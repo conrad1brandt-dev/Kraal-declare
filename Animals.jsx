@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { Plus, X, Search, ScanLine, Upload, ChevronLeft, GitBranch, Scale, Syringe, Heart } from "lucide-react";
+import { Plus, X, Search, ScanLine, Upload, Download, ChevronLeft, GitBranch, Scale, Syringe, Heart, Pencil, Trash2 } from "lucide-react";
 import Papa from "papaparse";
 import { supabase } from "./supabaseClient";
 import { dbRead, dbWrite } from "./offline";
@@ -60,9 +60,38 @@ export default function Animals({ establishmentId, isAdmin }) {
     }
   }
 
+  function exportCSV() {
+    const header = ["owner", "eartag_number", "species", "breed_category", "sex", "dob", "status"];
+    const lines = [header.join(",")];
+    for (const a of animals) {
+      const row = [
+        a.owners?.full_name || "Farm (shared/communal)",
+        a.eartag_number || "",
+        a.species || "",
+        a.breed_category || "",
+        a.sex || "",
+        a.dob || "",
+        a.status || "",
+      ].map((v) => {
+        const s = String(v ?? "");
+        return s.includes(",") || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s;
+      });
+      lines.push(row.join(","));
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `animals-export-${todayISO()}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
   if (loading) return <div className="container">Loading animals…</div>;
 
-  if (selected) return <AnimalDetail animal={selected} allAnimals={animals} isAdmin={isAdmin} establishmentId={establishmentId} onBack={() => { setSelected(null); load(); }} />;
+  if (selected) return <AnimalDetail animal={selected} allAnimals={animals} owners={owners} isAdmin={isAdmin} establishmentId={establishmentId} onBack={() => { setSelected(null); load(); }} />;
 
   return (
     <div className="container">
@@ -91,13 +120,16 @@ export default function Animals({ establishmentId, isAdmin }) {
         ))}
       </div>
 
-      {isAdmin && (
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        {isAdmin && (
           <button className="btn btn-secondary" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }} onClick={() => setShowImport(true)}>
             <Upload size={14} /> Import CSV
           </button>
-        </div>
-      )}
+        )}
+        <button className="btn btn-secondary" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }} onClick={exportCSV}>
+          <Download size={14} /> Export CSV
+        </button>
+      </div>
 
       {filtered.length === 0 ? (
         <div className="card" style={{ textAlign: "center", padding: 40, borderStyle: "dashed" }}>
@@ -130,7 +162,7 @@ export default function Animals({ establishmentId, isAdmin }) {
   );
 }
 
-function AnimalDetail({ animal, allAnimals, isAdmin, establishmentId, onBack }) {
+function AnimalDetail({ animal, allAnimals, owners, isAdmin, establishmentId, onBack }) {
   const dam = allAnimals.find((a) => a.id === animal.dam_id);
   const sire = allAnimals.find((a) => a.id === animal.sire_id);
   const offspring = allAnimals.filter((a) => a.dam_id === animal.id);
@@ -141,6 +173,27 @@ function AnimalDetail({ animal, allAnimals, isAdmin, establishmentId, onBack }) 
   const [showAddWeight, setShowAddWeight] = useState(false);
   const [showAddHealth, setShowAddHealth] = useState(false);
   const [showAddBreeding, setShowAddBreeding] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  async function updateAnimal(form) {
+    await supabase.from("animals").update(form).eq("id", animal.id);
+    setShowEdit(false);
+    onBack();
+  }
+
+  async function deleteAnimal() {
+    if (!confirm(`Delete animal ${animal.eartag_number}? This removes its weight, health, and breeding history too, and cannot be undone.`)) return;
+    setDeleting(true);
+    await supabase.from("animals").update({ dam_id: null }).eq("dam_id", animal.id);
+    await supabase.from("animals").update({ sire_id: null }).eq("sire_id", animal.id);
+    await supabase.from("weights").delete().eq("animal_id", animal.id);
+    await supabase.from("health_events").delete().eq("animal_id", animal.id);
+    await supabase.from("breeding_events").delete().eq("dam_id", animal.id);
+    await supabase.from("animals").delete().eq("id", animal.id);
+    setDeleting(false);
+    onBack();
+  }
 
   useEffect(() => { loadEvents(); }, [animal.id]);
 
@@ -175,11 +228,20 @@ function AnimalDetail({ animal, allAnimals, isAdmin, establishmentId, onBack }) 
 
   return (
     <div className="container">
-      <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: "var(--ink-soft)", fontSize: 14, fontWeight: 500, marginBottom: 12, cursor: "pointer" }}>
-        <ChevronLeft size={16} /> Back
-      </button>
+      <div className="row-between" style={{ marginBottom: 12 }}>
+        <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: "var(--ink-soft)", fontSize: 14, fontWeight: 500, cursor: "pointer" }}>
+          <ChevronLeft size={16} /> Back
+        </button>
+        {isAdmin && (
+          <div style={{ display: "flex", gap: 14 }}>
+            <button onClick={() => setShowEdit(true)} style={{ background: "none", border: "none", color: "var(--ink-soft)", cursor: "pointer" }}><Pencil size={18} /></button>
+            <button onClick={deleteAnimal} disabled={deleting} style={{ background: "none", border: "none", color: "var(--red)", cursor: "pointer" }}><Trash2 size={18} /></button>
+          </div>
+        )}
+      </div>
       <div className="font-tag" style={{ fontSize: 20, fontWeight: 700 }}>{animal.eartag_number}</div>
       <p style={{ fontSize: 14, color: "var(--ink-soft)", marginBottom: 12 }}>{animal.species} · {animal.breed_category || "—"} · {animal.owners?.full_name || "shared/communal"}</p>
+      {showEdit && <EditAnimalModal animal={animal} owners={owners} allAnimals={allAnimals} onClose={() => setShowEdit(false)} onSave={updateAnimal} />}
 
       <div className="tabs">
         <button className={`tab ${tab === "overview" ? "active" : ""}`} onClick={() => setTab("overview")}>Overview</button>
@@ -408,6 +470,88 @@ function AddAnimalModal({ owners, animals, onClose, onSave }) {
             </>
           )}
           <button className="btn btn-primary" disabled={!form.eartag_number} onClick={save}>Save animal</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EditAnimalModal({ animal, owners, allAnimals, onClose, onSave }) {
+  const [form, setForm] = useState({
+    owner_id: animal.owner_id || "",
+    eartag_number: animal.eartag_number || "",
+    species: animal.species || "cattle",
+    breed_category: animal.breed_category || "",
+    sex: animal.sex || "F",
+    dob: animal.dob || "",
+    status: animal.status || "active",
+    dam_id: animal.dam_id || "",
+    sire_id: animal.sire_id || "",
+  });
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const selectedOwner = owners.find((o) => o.id === form.owner_id);
+  const females = allAnimals.filter((a) => a.owner_id === form.owner_id && a.sex === "F" && a.id !== animal.id);
+  const males = allAnimals.filter((a) => a.owner_id === form.owner_id && a.sex === "M" && a.id !== animal.id);
+
+  function save() {
+    const payload = {
+      ...form,
+      owner_id: form.owner_id || null,
+      brand_mark_id: selectedOwner?.brand_marks?.[0]?.id || animal.brand_mark_id || null,
+      dam_id: form.dam_id || null,
+      sire_id: form.sire_id || null,
+    };
+    onSave(payload);
+  }
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal">
+        <div className="row-between" style={{ marginBottom: 16 }}>
+          <h3 className="font-display" style={{ fontSize: 18, fontWeight: 700 }}>Edit animal</h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--ink-soft)", cursor: "pointer" }}><X size={20} /></button>
+        </div>
+        <div className="stack">
+          <div className="field"><span className="field-label">Owner</span>
+            <select className="input" value={form.owner_id} onChange={(e) => set("owner_id", e.target.value)}>
+              <option value="">Farm (shared/communal)</option>
+              {owners.map((o) => <option key={o.id} value={o.id}>{o.full_name}</option>)}
+            </select>
+          </div>
+          <div className="field"><span className="field-label">Eartag number</span><input className="input font-tag" value={form.eartag_number} onChange={(e) => set("eartag_number", e.target.value)} /></div>
+          <div className="field"><span className="field-label">Species</span>
+            <select className="input" value={form.species} onChange={(e) => set("species", e.target.value)}>
+              {SPECIES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div className="field"><span className="field-label">Breed / category</span><input className="input" placeholder="e.g. Meatmaster Ram" value={form.breed_category} onChange={(e) => set("breed_category", e.target.value)} /></div>
+          <div className="grid-2">
+            <div className="field"><span className="field-label">Sex</span>
+              <select className="input" value={form.sex} onChange={(e) => set("sex", e.target.value)}>
+                <option value="F">Female</option><option value="M">Male</option>
+              </select>
+            </div>
+            <div className="field"><span className="field-label">DOB</span><input type="date" className="input" value={form.dob} onChange={(e) => set("dob", e.target.value)} /></div>
+          </div>
+          <div className="field"><span className="field-label">Status</span>
+            <select className="input" value={form.status} onChange={(e) => set("status", e.target.value)}>
+              <option value="active">Active</option>
+              <option value="slaughtered">Slaughtered</option>
+            </select>
+          </div>
+          <div className="field"><span className="field-label">Dam (mother, optional)</span>
+            <select className="input" value={form.dam_id} onChange={(e) => set("dam_id", e.target.value)}>
+              <option value="">— none —</option>
+              {females.map((f) => <option key={f.id} value={f.id}>{f.eartag_number}</option>)}
+            </select>
+          </div>
+          <div className="field"><span className="field-label">Sire (father, optional)</span>
+            <select className="input" value={form.sire_id} onChange={(e) => set("sire_id", e.target.value)}>
+              <option value="">— none —</option>
+              {males.map((m) => <option key={m.id} value={m.id}>{m.eartag_number}</option>)}
+            </select>
+          </div>
+          <button className="btn btn-primary" disabled={!form.eartag_number} onClick={save}>Save changes</button>
         </div>
       </div>
     </div>
