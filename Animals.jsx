@@ -418,7 +418,7 @@ function AddAnimalModal({ owners, animals, onClose, onSave }) {
   const males = animals.filter((a) => a.owner_id === form.owner_id && a.sex === "M");
 
   function save() {
-    const payload = { ...form, owner_id: form.owner_id || null, brand_mark_id: selectedOwner?.brand_marks?.[0]?.id || null };
+    const payload = { ...form, owner_id: form.owner_id || null, brand_mark_id: selectedOwner?.brand_marks?.[0]?.id || null, dob: form.dob || null };
     if (!payload.dam_id) delete payload.dam_id;
     if (!payload.sire_id) delete payload.sire_id;
     onSave(payload);
@@ -500,6 +500,7 @@ function EditAnimalModal({ animal, owners, allAnimals, onClose, onSave }) {
       brand_mark_id: selectedOwner?.brand_marks?.[0]?.id || animal.brand_mark_id || null,
       dam_id: form.dam_id || null,
       sire_id: form.sire_id || null,
+      dob: form.dob || null,
     };
     onSave(payload);
   }
