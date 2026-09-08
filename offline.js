@@ -28,6 +28,18 @@ export function queueLength() {
   return readQueue().length;
 }
 
+export function getQueue() {
+  return readQueue();
+}
+
+export function clearQueueItem(id) {
+  writeQueue(readQueue().filter((i) => i.id !== id));
+}
+
+export function clearAllQueue() {
+  writeQueue([]);
+}
+
 export function cacheGet(key) {
   try {
     const raw = localStorage.getItem(CACHE_PREFIX + key);
