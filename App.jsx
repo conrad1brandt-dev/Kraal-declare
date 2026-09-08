@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { Home as HomeIcon, PawPrint, Wallet, FileCheck, Menu, WifiOff, LogOut, Copy, Check, ChevronLeft, Eye } from "lucide-react";
+import { Home as HomeIcon, PawPrint, Wallet, FileCheck, Menu, WifiOff, LogOut, Copy, Check, ChevronLeft, Eye, X } from "lucide-react";
 import { supabase } from "./supabaseClient";
-import { isOnline, queueLength } from "./offline";
+import { isOnline, queueLength, flushQueue, getQueue, clearQueueItem, clearAllQueue } from "./offline";
 import Auth from "./Auth";
 import EstablishmentSetup from "./EstablishmentSetup";
 import Home from "./Home";
@@ -20,6 +20,42 @@ const SCREEN_TITLES = {
   grazing: "Grazing & Water", registers: "Registers", more: "More", settings: "Establishment",
 };
 
+function buildQueueExecutors(estId) {
+  return {
+    "animals:insert": (payload) => supabase.from("animals").insert({ establishment_id: estId, ...payload }),
+    "grazing:insert": (payload) => supabase.from("grazing_water_reports").insert({ establishment_id: estId, ...payload }),
+    "market_prices:insert": (payload) => supabase.from("market_prices").insert({ establishment_id: estId, ...payload }),
+    "transactions:insert": (payload) => supabase.from("transactions").insert({
+      establishment_id: estId, owner_id: payload.owner_id || null, type: payload.type,
+      category: payload.category, amount: parseFloat(payload.amount), date: payload.date, description: payload.description || null,
+    }),
+    "slaughter:insert": (payload) => {
+      const totalValue = payload.purpose === "sold" && payload.weight_kg && payload.price_per_kg
+        ? Number(payload.weight_kg) * Number(payload.price_per_kg) : null;
+      return supabase.from("slaughter_records").insert({
+        establishment_id: estId,
+        animal_id: payload.animal_id,
+        date: payload.date,
+        weight_kg: payload.weight_kg || null,
+        purpose: payload.purpose,
+        price_per_kg: payload.purpose === "sold" ? payload.price_per_kg || null : null,
+        total_value: totalValue,
+        buyer_name: payload.purpose === "sold" ? payload.buyer_name || null : null,
+        buyer_contact: payload.purpose === "sold" ? payload.buyer_contact || null : null,
+        linked_transaction_id: null,
+      });
+    },
+  };
+}
+
+const QUEUE_LABELS = {
+  "animals:insert": "New animal",
+  "grazing:insert": "New grazing/water report",
+  "market_prices:insert": "New market price",
+  "transactions:insert": "New finance entry",
+  "slaughter:insert": "New slaughter record",
+};
+
 export default function App() {
   const [session, setSession] = useState(undefined);
   const [establishment, setEstablishment] = useState(undefined);
@@ -34,18 +70,23 @@ export default function App() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
-    const goOnline = () => setOnline(true);
+    const goOnline = () => { setOnline(true); if (establishment?.id) flushQueue(buildQueueExecutors(establishment.id)).then(() => setPending(queueLength())); };
     const goOffline = () => setOnline(false);
     window.addEventListener("online", goOnline);
     window.addEventListener("offline", goOffline);
-    const interval = setInterval(() => setPending(queueLength()), 3000);
+    const interval = setInterval(async () => {
+      if (establishment?.id && isOnline() && queueLength() > 0) {
+        await flushQueue(buildQueueExecutors(establishment.id));
+      }
+      setPending(queueLength());
+    }, 3000);
     return () => {
       sub.subscription.unsubscribe();
       window.removeEventListener("online", goOnline);
       window.removeEventListener("offline", goOffline);
       clearInterval(interval);
     };
-  }, []);
+  }, [establishment?.id]);
 
   useEffect(() => {
     if (session?.user) loadEstablishment();
@@ -158,6 +199,32 @@ function MoreScreen({ establishment, onNavigate }) {
 
 function SettingsScreen({ establishment, isAdmin }) {
   const [copied, setCopied] = useState(false);
+  const [queue, setQueue] = useState(getQueue());
+  const [retrying, setRetrying] = useState(false);
+
+  function refreshQueue() {
+    setQueue(getQueue());
+  }
+
+  async function retryNow() {
+    setRetrying(true);
+    await flushQueue(buildQueueExecutors(establishment.id));
+    setRetrying(false);
+    refreshQueue();
+  }
+
+  function discardOne(id) {
+    if (!confirm("Discard this pending item? It will not be saved.")) return;
+    clearQueueItem(id);
+    refreshQueue();
+  }
+
+  function discardAll() {
+    if (!confirm(`Discard all ${queue.length} pending item(s)? None of them will be saved.`)) return;
+    clearAllQueue();
+    refreshQueue();
+  }
+
   function copyCode() {
     navigator.clipboard.writeText(establishment.invite_code);
     setCopied(true);
@@ -179,6 +246,31 @@ function SettingsScreen({ establishment, isAdmin }) {
           </button>
         </div>
       </div>
+      {isAdmin && queue.length > 0 && (
+        <div className="card" style={{ padding: 20, marginBottom: 16 }}>
+          <div className="row-between" style={{ marginBottom: 6 }}>
+            <div className="field-label">Pending syncs ({queue.length})</div>
+            <button onClick={discardAll} style={{ background: "none", border: "none", color: "var(--red)", cursor: "pointer", fontSize: 13 }}>Discard all</button>
+          </div>
+          <p style={{ fontSize: 13, color: "var(--ink-soft)", marginBottom: 12 }}>
+            These couldn't be saved yet — usually a signal drop, or a record with a problem the app rejected. Retry now, or discard and re-enter them.
+          </p>
+          <div className="stack" style={{ gap: 8, marginBottom: 12 }}>
+            {queue.map((item) => (
+              <div key={item.id} className="row-between" style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 8, padding: "10px 14px" }}>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>{QUEUE_LABELS[item.meta.key] || item.meta.key}</div>
+                  <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>{new Date(item.ts).toLocaleString()}</div>
+                </div>
+                <button onClick={() => discardOne(item.id)} style={{ background: "none", border: "none", color: "var(--red)", cursor: "pointer" }}><X size={16} /></button>
+              </div>
+            ))}
+          </div>
+          <button className="btn btn-secondary" style={{ width: "100%" }} disabled={retrying} onClick={retryNow}>
+            {retrying ? "Retrying…" : "Retry now"}
+          </button>
+        </div>
+      )}
       <button className="btn btn-secondary" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%" }} onClick={() => supabase.auth.signOut()}>
         <LogOut size={15} /> Sign out
       </button>
