@@ -3,6 +3,31 @@ import { Plus, X, ChevronLeft, Clock, CheckCircle2, Pencil, Trash2, TrendingUp }
 import { supabase } from "./supabaseClient";
 import { dbRead, dbWrite } from "./offline";
 
+const CATEGORY_ORDER = {
+  sheep: ["Groot Ooie (mature ewe/nanny)", "Hamel/Kapater (castrated male)", "Jong Ooie (young ewe/nanny)", "Lam (female)", "Lam (male)"],
+  goats: ["Groot Ooie (mature ewe/nanny)", "Hamel/Kapater (castrated male)", "Jong Ooie (young ewe/nanny)", "Lam (female)", "Lam (male)"],
+  cattle: ["Groot Koeie (mature cow)", "Jong Vers (young heifer)", "Tollie (young bull/steer)", "Kalf (female)", "Kalf (male)"],
+};
+
+function categorize(species, breedCategory, sex) {
+  const bc = (breedCategory || "").toLowerCase();
+  if (species === "sheep" || species === "goats") {
+    if (bc.includes("lam")) return sex === "M" ? "Lam (male)" : "Lam (female)";
+    if (bc.includes("hamel") || bc.includes("kapater")) return "Hamel/Kapater (castrated male)";
+    if (bc.includes("jong")) return "Jong Ooie (young ewe/nanny)";
+    if (bc.includes("groot")) return "Groot Ooie (mature ewe/nanny)";
+    return "Other / uncategorized";
+  }
+  if (species === "cattle") {
+    if (bc.includes("kalf")) return sex === "M" ? "Kalf (male)" : "Kalf (female)";
+    if (bc.includes("tollie")) return "Tollie (young bull/steer)";
+    if (bc.includes("vers")) return "Jong Vers (young heifer)";
+    if (bc.includes("groot") || bc.includes("koei")) return "Groot Koeie (mature cow)";
+    return "Other / uncategorized";
+  }
+  return null;
+}
+
 export default function Owners({ establishmentId, isAdmin }) {
   const [owners, setOwners] = useState([]);
   const [animals, setAnimals] = useState([]);
@@ -85,8 +110,16 @@ export default function Owners({ establishmentId, isAdmin }) {
   const summary = useMemo(() => {
     const relevant = animals.filter((a) => a.status === "active" && (filter === "all" || a.owner_id === filter));
     const bySpecies = { cattle: 0, sheep: 0, goats: 0, pigs: 0, donkeys: 0, horses: 0, ostriches: 0, poultry: 0, other: 0 };
-    relevant.forEach((a) => { bySpecies[a.species] = (bySpecies[a.species] || 0) + 1; });
-    return { total: relevant.length, bySpecies };
+    const byCategory = {};
+    relevant.forEach((a) => {
+      bySpecies[a.species] = (bySpecies[a.species] || 0) + 1;
+      const cat = categorize(a.species, a.breed_category, a.sex);
+      if (cat) {
+        byCategory[a.species] = byCategory[a.species] || {};
+        byCategory[a.species][cat] = (byCategory[a.species][cat] || 0) + 1;
+      }
+    });
+    return { total: relevant.length, bySpecies, byCategory };
   }, [animals, filter]);
 
   if (loading) return <div className="container">Loading owners…</div>;
@@ -111,10 +144,29 @@ export default function Owners({ establishmentId, isAdmin }) {
           <div className="field-label">{selectedOwner ? `${selectedOwner.full_name} — active herd` : "Farm-wide active herd"}</div>
           <span className="font-display" style={{ fontWeight: 700, fontSize: 20 }}>{summary.total}</span>
         </div>
-        <div className="grid-2">
+        <div className="stack" style={{ gap: 14 }}>
           {Object.entries(summary.bySpecies).filter(([, c]) => c > 0).map(([sp, c]) => (
-            <div key={sp} className="row-between" style={{ fontSize: 13, padding: "4px 0" }}>
-              <span style={{ textTransform: "capitalize" }}>{sp}</span><span className="font-tag" style={{ fontWeight: 600 }}>{c}</span>
+            <div key={sp}>
+              <div className="row-between" style={{ fontSize: 14, fontWeight: 600 }}>
+                <span style={{ textTransform: "capitalize" }}>{sp}</span>
+                <span className="font-tag">{c}</span>
+              </div>
+              {CATEGORY_ORDER[sp] && (
+                <div style={{ paddingLeft: 12, marginTop: 4 }}>
+                  {CATEGORY_ORDER[sp].map((cat) => (
+                    <div key={cat} className="row-between" style={{ fontSize: 12, color: "var(--ink-soft)", padding: "2px 0" }}>
+                      <span>{cat}</span>
+                      <span className="font-tag">{summary.byCategory[sp]?.[cat] || 0}</span>
+                    </div>
+                  ))}
+                  {summary.byCategory[sp]?.["Other / uncategorized"] > 0 && (
+                    <div className="row-between" style={{ fontSize: 12, color: "var(--ink-soft)", padding: "2px 0" }}>
+                      <span>Other / uncategorized</span>
+                      <span className="font-tag">{summary.byCategory[sp]["Other / uncategorized"]}</span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>
