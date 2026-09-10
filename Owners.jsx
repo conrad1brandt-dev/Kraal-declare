@@ -48,7 +48,7 @@ export default function Owners({ establishmentId, isAdmin }) {
         supabase.from("owners").select("*, brand_marks(*)").eq("establishment_id", establishmentId).order("full_name")
       ),
       dbRead(`animals_for_owners:${establishmentId}`, () =>
-        supabase.from("animals").select("id, owner_id, species, breed_category, status").eq("establishment_id", establishmentId)
+        supabase.from("animals").select("id, owner_id, species, breed_category, sex, status").eq("establishment_id", establishmentId)
       ),
       dbRead(`market_prices:${establishmentId}`, () =>
         supabase.from("market_prices").select("*").eq("establishment_id", establishmentId).order("as_of_date", { ascending: false })
