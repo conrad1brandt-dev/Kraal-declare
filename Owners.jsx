@@ -9,17 +9,18 @@ const CATEGORY_ORDER = {
   cattle: ["Groot Koeie (mature cow)", "Jong Vers (young heifer)", "Tollie (young bull/steer)", "Kalf (female)", "Kalf (male)"],
 };
 
-function categorize(species, breedCategory, sex) {
+function categorize(species, breedCategory, sexRaw) {
   const bc = (breedCategory || "").toLowerCase();
+  const isMale = (sexRaw || "").toString().trim().toUpperCase().startsWith("M");
   if (species === "sheep" || species === "goats") {
-    if (bc.includes("lam")) return sex === "M" ? "Lam (male)" : "Lam (female)";
+    if (bc.includes("lam")) return isMale ? "Lam (male)" : "Lam (female)";
     if (bc.includes("hamel") || bc.includes("kapater")) return "Hamel/Kapater (castrated male)";
     if (bc.includes("jong")) return "Jong Ooie (young ewe/nanny)";
     if (bc.includes("groot")) return "Groot Ooie (mature ewe/nanny)";
     return "Other / uncategorized";
   }
   if (species === "cattle") {
-    if (bc.includes("kalf")) return sex === "M" ? "Kalf (male)" : "Kalf (female)";
+    if (bc.includes("kalf")) return isMale ? "Kalf (male)" : "Kalf (female)";
     if (bc.includes("tollie")) return "Tollie (young bull/steer)";
     if (bc.includes("vers")) return "Jong Vers (young heifer)";
     if (bc.includes("groot") || bc.includes("koei")) return "Groot Koeie (mature cow)";
