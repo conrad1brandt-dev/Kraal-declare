@@ -76,12 +76,24 @@ export default function Owners({ establishmentId, isAdmin }) {
 
   async function updateOwner(id, form) {
     await supabase.from("owners").update(form.owner).eq("id", id);
+    let brandMarkId = form.brandId || null;
     if (form.brandId) {
       await supabase.from("brand_marks").update({
         stock_brand_code: form.brand.stock_brand_code || null,
         status: form.brand.stock_brand_code ? "registered" : "pending_registration",
         pending_reference: form.brand.pending_reference || null,
       }).eq("id", form.brandId);
+    } else if (form.brand.stock_brand_code || form.brand.pending_reference) {
+      const { data: newBrand } = await supabase.from("brand_marks").insert({
+        owner_id: id,
+        stock_brand_code: form.brand.stock_brand_code || null,
+        status: form.brand.stock_brand_code ? "registered" : "pending_registration",
+        pending_reference: form.brand.pending_reference || null,
+      }).select().single();
+      brandMarkId = newBrand?.id || null;
+    }
+    if (brandMarkId) {
+      await supabase.from("animals").update({ brand_mark_id: brandMarkId }).eq("owner_id", id);
     }
     setShowEdit(null);
     load();
