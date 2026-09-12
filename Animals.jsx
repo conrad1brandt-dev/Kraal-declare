@@ -418,7 +418,7 @@ function AddAnimalModal({ owners, animals, onClose, onSave }) {
   const males = animals.filter((a) => a.owner_id === form.owner_id && a.sex === "M");
 
   function save() {
-    const payload = { ...form, owner_id: form.owner_id || null, brand_mark_id: selectedOwner?.brand_marks?.[0]?.id || null, dob: form.dob || null };
+    const payload = { ...form, owner_id: form.owner_id || null, brand_mark_id: (Array.isArray(selectedOwner?.brand_marks) ? selectedOwner.brand_marks[0] : selectedOwner?.brand_marks)?.id || null, dob: form.dob || null };
     if (!payload.dam_id) delete payload.dam_id;
     if (!payload.sire_id) delete payload.sire_id;
     onSave(payload);
@@ -497,7 +497,7 @@ function EditAnimalModal({ animal, owners, allAnimals, onClose, onSave }) {
     const payload = {
       ...form,
       owner_id: form.owner_id || null,
-      brand_mark_id: selectedOwner?.brand_marks?.[0]?.id || animal.brand_mark_id || null,
+      brand_mark_id: (Array.isArray(selectedOwner?.brand_marks) ? selectedOwner.brand_marks[0] : selectedOwner?.brand_marks)?.id || animal.brand_mark_id || null,
       dam_id: form.dam_id || null,
       sire_id: form.sire_id || null,
       dob: form.dob || null,
@@ -586,7 +586,7 @@ function ImportModal({ establishmentId, owners, onClose, onDone }) {
       toInsert.push({
         establishment_id: establishmentId,
         owner_id: owner ? owner.id : null,
-        brand_mark_id: owner?.brand_marks?.[0]?.id || null,
+        brand_mark_id: (Array.isArray(owner?.brand_marks) ? owner.brand_marks[0] : owner?.brand_marks)?.id || null,
         eartag_number: String(r.eartag_number).trim(),
         species: (r.species || "cattle").toLowerCase().trim(),
         breed_category: r.breed_category || r.category || null,

@@ -215,7 +215,7 @@ export default function Owners({ establishmentId, isAdmin }) {
       ) : (
         <div className="stack">
           {owners.filter((o) => filter === "all" || o.id === filter).map((o) => {
-            const brand = o.brand_marks?.[0];
+            const brand = Array.isArray(o.brand_marks) ? o.brand_marks[0] : o.brand_marks;
             return (
               <div key={o.id} className="card row-between" style={{ padding: "12px 16px" }}>
                 <div>
@@ -282,7 +282,7 @@ function AddOwnerModal({ onClose, onSave }) {
 }
 
 function EditOwnerModal({ owner, onClose, onSave }) {
-  const brand = owner.brand_marks?.[0];
+  const brand = Array.isArray(owner.brand_marks) ? owner.brand_marks[0] : owner.brand_marks;
   const [form, setForm] = useState({
     full_name: owner.full_name || "", email: owner.email || "", contact_number: owner.contact_number || "",
     id_number: owner.id_number || "", residential_address: owner.residential_address || "", po_box: owner.po_box || "",
