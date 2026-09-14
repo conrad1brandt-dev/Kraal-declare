@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { Plus, X, Scale, Trash2 } from "lucide-react";
+import React, { useState, useEffect, useMemo } from "react";
+import { Plus, X, Scale, Trash2, Printer, AlertTriangle } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { dbRead, dbWrite } from "./offline";
 
@@ -8,6 +8,7 @@ export default function Slaughter({ establishmentId, isAdmin }) {
   const [animals, setAnimals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
+  const [view, setView] = useState("list");
 
   useEffect(() => { load(); }, [establishmentId]);
 
@@ -80,13 +81,46 @@ export default function Slaughter({ establishmentId, isAdmin }) {
     load();
   }
 
+  const groups = useMemo(() => {
+    const byOwner = {};
+    records.forEach((r) => {
+      const name = r.animals?.owners?.full_name || "Farm (shared/communal)";
+      byOwner[name] = byOwner[name] || [];
+      byOwner[name].push(r);
+    });
+    const ownerNames = Object.keys(byOwner).sort();
+    const withTotals = ownerNames.map((name) => {
+      const rows = byOwner[name].slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+      const subtotalValue = rows.reduce((sum, r) => sum + (Number(r.total_value) || 0), 0);
+      const subtotalWeight = rows.reduce((sum, r) => sum + (Number(r.weight_kg) || 0), 0);
+      const missingCount = rows.filter((r) => r.purpose === "sold" && (!r.price_per_kg || !r.total_value)).length;
+      return { name, rows, subtotalValue, subtotalWeight, missingCount };
+    });
+    const grandTotalValue = withTotals.reduce((sum, g) => sum + g.subtotalValue, 0);
+    const grandTotalWeight = withTotals.reduce((sum, g) => sum + g.subtotalWeight, 0);
+    const grandMissingCount = withTotals.reduce((sum, g) => sum + g.missingCount, 0);
+    return { withTotals, grandTotalValue, grandTotalWeight, grandMissingCount };
+  }, [records]);
+
   if (loading) return <div className="container">Loading slaughter records…</div>;
 
   return (
     <div className="container">
-      <p style={{ fontSize: 14, color: "var(--ink-soft)", marginBottom: 16 }}>{records.length} record(s)</p>
+      <div className="row-between no-print" style={{ marginBottom: 12 }}>
+        <div className="tabs" style={{ marginBottom: 0 }}>
+          <button className={`tab ${view === "list" ? "active" : ""}`} onClick={() => setView("list")}>List</button>
+          <button className={`tab ${view === "summary" ? "active" : ""}`} onClick={() => setView("summary")}>Summary by owner</button>
+        </div>
+        {view === "summary" && (
+          <button className="btn btn-secondary" style={{ display: "flex", alignItems: "center", gap: 6 }} onClick={() => window.print()}>
+            <Printer size={14} /> Print / Save as PDF
+          </button>
+        )}
+      </div>
 
-      {records.length === 0 ? (
+      {view === "list" && <p style={{ fontSize: 14, color: "var(--ink-soft)", marginBottom: 16 }}>{records.length} record(s)</p>}
+
+      {view === "list" && (records.length === 0 ? (
         <div className="card" style={{ textAlign: "center", padding: 40, borderStyle: "dashed" }}>
           <p className="font-display" style={{ fontSize: 18, marginBottom: 4 }}>No slaughter records yet</p>
         </div>
@@ -118,10 +152,77 @@ export default function Slaughter({ establishmentId, isAdmin }) {
             </div>
           ))}
         </div>
+      ))}
+
+      {view === "summary" && (
+        records.length === 0 ? (
+          <div className="card" style={{ textAlign: "center", padding: 40, borderStyle: "dashed" }}>
+            <p className="font-display" style={{ fontSize: 18, marginBottom: 4 }}>No slaughter records yet</p>
+          </div>
+        ) : (
+          <div>
+            {groups.grandMissingCount > 0 && (
+              <div className="card no-print" style={{ padding: "12px 16px", marginBottom: 16, background: "var(--red-soft)", display: "flex", alignItems: "center", gap: 8 }}>
+                <AlertTriangle size={16} color="var(--red)" />
+                <span style={{ fontSize: 13, color: "var(--red)" }}>
+                  {groups.grandMissingCount} sold record(s) are missing a price or total value — flagged in red below.
+                </span>
+              </div>
+            )}
+            {groups.withTotals.map((g) => (
+              <div key={g.name} style={{ marginBottom: 24 }}>
+                <h3 className="font-display" style={{ fontSize: 17, marginBottom: 8 }}>{g.name}</h3>
+                <table className="register-table">
+                  <thead>
+                    <tr><th>Animal</th><th>Date</th><th>Weight</th><th>Usage</th><th>Buyer</th><th>Price/kg</th><th>Total</th></tr>
+                  </thead>
+                  <tbody>
+                    {g.rows.map((r) => {
+                      const missing = r.purpose === "sold" && (!r.price_per_kg || !r.total_value);
+                      return (
+                        <tr key={r.id} style={missing ? { color: "var(--red)" } : undefined}>
+                          <td className="font-tag">{r.animals?.eartag_number}</td>
+                          <td>{r.date}</td>
+                          <td>{r.weight_kg ? `${r.weight_kg}kg` : "—"}</td>
+                          <td>{r.purpose === "sold" ? "Sold" : "Own use"}</td>
+                          <td>{r.purpose === "sold" ? (r.buyer_name || "—") : "—"}</td>
+                          <td>{r.purpose === "sold" && r.price_per_kg ? `N$ ${Number(r.price_per_kg).toFixed(2)}` : "—"}</td>
+                          <td>
+                            {r.purpose === "sold"
+                              ? (r.total_value ? `N$ ${Number(r.total_value).toFixed(2)}` : (
+                                <span style={{ display: "flex", alignItems: "center", gap: 4 }}><AlertTriangle size={12} /> missing</span>
+                              ))
+                              : "—"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    <tr style={{ fontWeight: 700 }}>
+                      <td colSpan={2}>Subtotal — {g.name}</td>
+                      <td>{g.subtotalWeight ? `${g.subtotalWeight}kg` : "—"}</td>
+                      <td colSpan={3}></td>
+                      <td>N$ {g.subtotalValue.toFixed(2)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            ))}
+            <table className="register-table">
+              <tbody>
+                <tr style={{ fontWeight: 700, fontSize: 15 }}>
+                  <td colSpan={2}>Overall total</td>
+                  <td>{groups.grandTotalWeight}kg</td>
+                  <td colSpan={3}></td>
+                  <td>N$ {groups.grandTotalValue.toFixed(2)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )
       )}
 
       {isAdmin && (
-        <button className="btn btn-primary" style={{ position: "fixed", bottom: 88, right: 20, width: 56, height: 56, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}
+        <button className="btn btn-primary no-print" style={{ position: "fixed", bottom: 88, right: 20, width: 56, height: 56, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}
           onClick={() => setShowAdd(true)}><Plus size={24} /></button>
       )}
       {showAdd && <AddSlaughterModal animals={animals} onClose={() => setShowAdd(false)} onSave={addSlaughter} />}
