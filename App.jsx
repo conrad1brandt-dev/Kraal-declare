@@ -219,16 +219,22 @@ function SettingsScreen({ establishment, isAdmin, onEstablishmentChange }) {
 
   async function loadMembers() {
     setLoadingMembers(true);
-    const { data } = await supabase.from("establishment_members")
-      .select("id, user_id, role, joined_at, profiles(email)")
+    const { data: rows } = await supabase.from("establishment_members")
+      .select("id, user_id, role, joined_at")
       .eq("establishment_id", establishment.id)
       .order("joined_at", { ascending: true });
-    setMembers(data || []);
+    const userIds = (rows || []).map((r) => r.user_id);
+    let profileMap = {};
+    if (userIds.length > 0) {
+      const { data: profiles } = await supabase.from("profiles").select("id, email").in("id", userIds);
+      (profiles || []).forEach((p) => { profileMap[p.id] = p.email; });
+    }
+    setMembers((rows || []).map((r) => ({ ...r, email: profileMap[r.user_id] || null })));
     setLoadingMembers(false);
   }
 
   async function removeMember(m) {
-    if (!confirm(`Remove ${m.profiles?.email || "this person"}'s access? They'll need a fresh invite code to rejoin.`)) return;
+    if (!confirm(`Remove ${m.email || "this person"}'s access? They'll need a fresh invite code to rejoin.`)) return;
     await supabase.from("establishment_members").delete().eq("id", m.id);
     loadMembers();
   }
@@ -304,7 +310,7 @@ function SettingsScreen({ establishment, isAdmin, onEstablishmentChange }) {
               {members.map((m) => (
                 <div key={m.id} className="row-between" style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 8, padding: "10px 14px" }}>
                   <div>
-                    <div style={{ fontSize: 13.5, fontWeight: 600 }}>{m.profiles?.email || "unknown"}</div>
+                    <div style={{ fontSize: 13.5, fontWeight: 600 }}>{m.email || "unknown"}</div>
                     <div style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
                       {m.role === "owner_admin" ? "Admin (you)" : "View-only"} · joined {new Date(m.joined_at).toLocaleDateString()}
                     </div>
