@@ -68,8 +68,18 @@ export default function App() {
   const isAdmin = role === "owner_admin";
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      if (data.session?.user) {
+        supabase.from("profiles").upsert({ id: data.session.user.id, email: data.session.user.email, updated_at: new Date().toISOString() }).then(() => {});
+      }
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
+      setSession(s);
+      if (s?.user) {
+        supabase.from("profiles").upsert({ id: s.user.id, email: s.user.email, updated_at: new Date().toISOString() }).then(() => {});
+      }
+    });
     const goOnline = () => { setOnline(true); if (establishment?.id) flushQueue(buildQueueExecutors(establishment.id)).then(() => setPending(queueLength())); };
     const goOffline = () => setOnline(false);
     window.addEventListener("online", goOnline);
@@ -157,7 +167,7 @@ export default function App() {
       {screen === "health" && <LossesHealth establishmentId={establishment.id} isAdmin={isAdmin} />}
       {screen === "feed" && <LossesHealth establishmentId={establishment.id} isAdmin={isAdmin} initialTab="feed" />}
       {screen === "more" && <MoreScreen establishment={establishment} onNavigate={setScreen} />}
-      {screen === "settings" && <SettingsScreen establishment={establishment} isAdmin={isAdmin} />}
+      {screen === "settings" && <SettingsScreen establishment={establishment} isAdmin={isAdmin} onEstablishmentChange={loadEstablishment} />}
 
       <nav className="nav-bottom">
         <button className={`nav-item ${screen === "home" ? "active" : ""}`} onClick={() => setScreen("home")}><HomeIcon size={20} /> Home</button>
@@ -197,10 +207,40 @@ function MoreScreen({ establishment, onNavigate }) {
   );
 }
 
-function SettingsScreen({ establishment, isAdmin }) {
+function SettingsScreen({ establishment, isAdmin, onEstablishmentChange }) {
   const [copied, setCopied] = useState(false);
   const [queue, setQueue] = useState(getQueue());
   const [retrying, setRetrying] = useState(false);
+  const [members, setMembers] = useState([]);
+  const [loadingMembers, setLoadingMembers] = useState(true);
+  const [regenerating, setRegenerating] = useState(false);
+
+  useEffect(() => { loadMembers(); }, [establishment.id]);
+
+  async function loadMembers() {
+    setLoadingMembers(true);
+    const { data } = await supabase.from("establishment_members")
+      .select("id, user_id, role, joined_at, profiles(email)")
+      .eq("establishment_id", establishment.id)
+      .order("joined_at", { ascending: true });
+    setMembers(data || []);
+    setLoadingMembers(false);
+  }
+
+  async function removeMember(m) {
+    if (!confirm(`Remove ${m.profiles?.email || "this person"}'s access? They'll need a fresh invite code to rejoin.`)) return;
+    await supabase.from("establishment_members").delete().eq("id", m.id);
+    loadMembers();
+  }
+
+  async function regenerateCode() {
+    if (!confirm("Generate a new invite code? The old code will stop working immediately — anyone who hasn't joined yet will need the new one.")) return;
+    setRegenerating(true);
+    const newCode = Array.from(crypto.getRandomValues(new Uint8Array(4))).map((b) => b.toString(16).padStart(2, "0")).join("");
+    await supabase.from("establishments").update({ invite_code: newCode }).eq("id", establishment.id);
+    await onEstablishmentChange();
+    setRegenerating(false);
+  }
 
   function refreshQueue() {
     setQueue(getQueue());
@@ -245,7 +285,39 @@ function SettingsScreen({ establishment, isAdmin }) {
             {copied ? <><Check size={14} /> Copied</> : <><Copy size={14} /> Copy</>}
           </button>
         </div>
+        {isAdmin && (
+          <button className="btn btn-secondary" style={{ width: "100%", marginTop: 10, fontSize: 13 }} disabled={regenerating} onClick={regenerateCode}>
+            {regenerating ? "Generating…" : "Generate a new code"}
+          </button>
+        )}
       </div>
+      {isAdmin && (
+        <div className="card" style={{ padding: 20, marginBottom: 16 }}>
+          <div className="field-label" style={{ marginBottom: 6 }}>People with access ({members.length})</div>
+          <p style={{ fontSize: 13, color: "var(--ink-soft)", marginBottom: 12 }}>
+            Everyone who has joined using your invite code. Remove anyone who shouldn't have access anymore.
+          </p>
+          {loadingMembers ? (
+            <p style={{ fontSize: 13, color: "var(--ink-soft)" }}>Loading…</p>
+          ) : (
+            <div className="stack" style={{ gap: 8 }}>
+              {members.map((m) => (
+                <div key={m.id} className="row-between" style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 8, padding: "10px 14px" }}>
+                  <div>
+                    <div style={{ fontSize: 13.5, fontWeight: 600 }}>{m.profiles?.email || "unknown"}</div>
+                    <div style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
+                      {m.role === "owner_admin" ? "Admin (you)" : "View-only"} · joined {new Date(m.joined_at).toLocaleDateString()}
+                    </div>
+                  </div>
+                  {m.role !== "owner_admin" && (
+                    <button onClick={() => removeMember(m)} style={{ background: "none", border: "none", color: "var(--red)", cursor: "pointer" }}><X size={16} /></button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       {isAdmin && queue.length > 0 && (
         <div className="card" style={{ padding: 20, marginBottom: 16 }}>
           <div className="row-between" style={{ marginBottom: 6 }}>
