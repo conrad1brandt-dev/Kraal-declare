@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Plus, X, Scale, Trash2, Printer, AlertTriangle } from "lucide-react";
+import { Plus, X, Scale, Trash2, Printer, AlertTriangle, Pencil } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { dbRead, dbWrite } from "./offline";
 
@@ -8,6 +8,7 @@ export default function Slaughter({ establishmentId, isAdmin }) {
   const [animals, setAnimals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
+  const [showEdit, setShowEdit] = useState(null);
   const [view, setView] = useState("list");
 
   useEffect(() => { load(); }, [establishmentId]);
@@ -69,6 +70,54 @@ export default function Slaughter({ establishmentId, isAdmin }) {
       { key: "slaughter:insert", payload: form }
     );
     setShowAdd(false);
+    load();
+  }
+
+  async function updateSlaughter(record, form) {
+    const totalValue = form.purpose === "sold" && form.weight_kg && form.price_per_kg
+      ? Number(form.weight_kg) * Number(form.price_per_kg) : null;
+
+    // If the animal was changed, put the old one back to active and mark the new one slaughtered
+    if (form.animal_id !== record.animal_id) {
+      await supabase.from("animals").update({ status: "active" }).eq("id", record.animal_id);
+      await supabase.from("animals").update({ status: "slaughtered" }).eq("id", form.animal_id);
+    }
+
+    // Keep the linked Finance entry in sync with whatever changed
+    let linkedTxnId = record.linked_transaction_id || null;
+    if (form.purpose === "sold" && totalValue) {
+      if (linkedTxnId) {
+        await supabase.from("transactions").update({
+          owner_id: form.owner_id, animal_id: form.animal_id, amount: totalValue, date: form.date,
+          description: `Slaughter sale — ${form.buyer_name || "buyer not recorded"}`,
+        }).eq("id", linkedTxnId);
+      } else {
+        const { data: txn } = await supabase.from("transactions").insert({
+          establishment_id: establishmentId, owner_id: form.owner_id, animal_id: form.animal_id,
+          type: "income", category: "Livestock sale", amount: totalValue, date: form.date,
+          description: `Slaughter sale — ${form.buyer_name || "buyer not recorded"}`,
+        }).select().single();
+        linkedTxnId = txn?.id || null;
+      }
+    } else if (linkedTxnId) {
+      // no longer a valid sale — remove the stale income entry
+      await supabase.from("transactions").delete().eq("id", linkedTxnId);
+      linkedTxnId = null;
+    }
+
+    await supabase.from("slaughter_records").update({
+      animal_id: form.animal_id,
+      date: form.date,
+      weight_kg: form.weight_kg || null,
+      purpose: form.purpose,
+      price_per_kg: form.purpose === "sold" ? form.price_per_kg || null : null,
+      total_value: totalValue,
+      buyer_name: form.purpose === "sold" ? form.buyer_name || null : null,
+      buyer_contact: form.purpose === "sold" ? form.buyer_contact || null : null,
+      linked_transaction_id: linkedTxnId,
+    }).eq("id", record.id);
+
+    setShowEdit(null);
     load();
   }
 
@@ -144,9 +193,14 @@ export default function Slaughter({ establishmentId, isAdmin }) {
                   {r.purpose === "sold" ? "sold" : "own use"}
                 </span>
                 {isAdmin && (
-                  <button onClick={() => deleteRecord(r.id, r.animal_id)} style={{ background: "none", border: "none", color: "var(--red)", cursor: "pointer" }}>
-                    <Trash2 size={14} />
-                  </button>
+                  <>
+                    <button onClick={() => setShowEdit(r)} style={{ background: "none", border: "none", color: "var(--ink-soft)", cursor: "pointer" }}>
+                      <Pencil size={14} />
+                    </button>
+                    <button onClick={() => deleteRecord(r.id, r.animal_id)} style={{ background: "none", border: "none", color: "var(--red)", cursor: "pointer" }}>
+                      <Trash2 size={14} />
+                    </button>
+                  </>
                 )}
               </div>
             </div>
@@ -226,6 +280,7 @@ export default function Slaughter({ establishmentId, isAdmin }) {
           onClick={() => setShowAdd(true)}><Plus size={24} /></button>
       )}
       {showAdd && <AddSlaughterModal animals={animals} onClose={() => setShowAdd(false)} onSave={addSlaughter} />}
+      {showEdit && <EditSlaughterModal record={showEdit} animals={animals} onClose={() => setShowEdit(null)} onSave={(form) => updateSlaughter(showEdit, form)} />}
     </div>
   );
 }
@@ -273,6 +328,68 @@ function AddSlaughterModal({ animals, onClose, onSave }) {
             </>
           )}
           <button className="btn btn-primary" disabled={!form.animal_id} onClick={save}>Save record</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EditSlaughterModal({ record, animals, onClose, onSave }) {
+  const [form, setForm] = useState({
+    animal_id: record.animal_id,
+    date: record.date,
+    weight_kg: record.weight_kg || "",
+    purpose: record.purpose,
+    price_per_kg: record.price_per_kg || "",
+    buyer_name: record.buyer_name || "",
+    buyer_contact: record.buyer_contact || "",
+  });
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  // The record's own animal is "slaughtered" now, so it won't be in the
+  // active-only list — add it back in so it still shows up, pre-selected.
+  const animalOptions = animals.some((a) => a.id === record.animal_id)
+    ? animals
+    : [{ id: record.animal_id, eartag_number: record.animals?.eartag_number, species: record.animals?.species, owner_id: record.animals?.owner_id, owners: record.animals?.owners }, ...animals];
+
+  const selectedAnimal = animalOptions.find((a) => a.id === form.animal_id);
+
+  function save() {
+    onSave({ ...form, owner_id: selectedAnimal?.owner_id });
+  }
+
+  const total = form.weight_kg && form.price_per_kg ? (Number(form.weight_kg) * Number(form.price_per_kg)).toFixed(2) : null;
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal">
+        <div className="row-between" style={{ marginBottom: 16 }}>
+          <h3 className="font-display" style={{ fontSize: 18, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}><Scale size={18} /> Edit slaughter record</h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--ink-soft)", cursor: "pointer" }}><X size={20} /></button>
+        </div>
+        <div className="stack">
+          <div className="field"><span className="field-label">Animal</span>
+            <select className="input" value={form.animal_id} onChange={(e) => set("animal_id", e.target.value)}>
+              {animalOptions.map((a) => <option key={a.id} value={a.id}>{a.eartag_number} — {a.species} — {a.owners?.full_name}</option>)}
+            </select>
+          </div>
+          <div className="grid-2">
+            <div className="field"><span className="field-label">Date</span><input type="date" className="input" value={form.date} onChange={(e) => set("date", e.target.value)} /></div>
+            <div className="field"><span className="field-label">Weight (kg)</span><input type="number" className="input" value={form.weight_kg} onChange={(e) => set("weight_kg", e.target.value)} /></div>
+          </div>
+          <div className="tabs" style={{ marginBottom: 0 }}>
+            <button className={`tab ${form.purpose === "own_consumption" ? "active" : ""}`} style={{ flex: 1 }} onClick={() => set("purpose", "own_consumption")}>Own consumption</button>
+            <button className={`tab ${form.purpose === "sold" ? "active" : ""}`} style={{ flex: 1 }} onClick={() => set("purpose", "sold")}>Sold</button>
+          </div>
+          {form.purpose === "sold" && (
+            <>
+              <div className="field"><span className="field-label">Price per kg (N$)</span><input type="number" className="input" value={form.price_per_kg} onChange={(e) => set("price_per_kg", e.target.value)} /></div>
+              {total && <p style={{ fontSize: 13, color: "var(--green)", fontWeight: 600 }}>Total: N$ {total}</p>}
+              <div className="field"><span className="field-label">Buyer name</span><input className="input" value={form.buyer_name} onChange={(e) => set("buyer_name", e.target.value)} /></div>
+              <div className="field"><span className="field-label">Buyer contact</span><input className="input" value={form.buyer_contact} onChange={(e) => set("buyer_contact", e.target.value)} /></div>
+            </>
+          )}
+          <button className="btn btn-primary" disabled={!form.animal_id} onClick={save}>Save changes</button>
         </div>
       </div>
     </div>
