@@ -538,6 +538,8 @@ function EditAnimalModal({ animal, owners, allAnimals, onClose, onSave }) {
             <select className="input" value={form.status} onChange={(e) => set("status", e.target.value)}>
               <option value="active">Active</option>
               <option value="slaughtered">Slaughtered</option>
+              <option value="deceased">Deceased</option>
+              <option value="stolen">Stolen</option>
             </select>
           </div>
           <div className="field"><span className="field-label">Dam (mother, optional)</span>

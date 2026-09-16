@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Plus, X, Trash2, Upload } from "lucide-react";
+import { Plus, X, Trash2, Upload, Pencil } from "lucide-react";
 import Papa from "papaparse";
 import { supabase } from "./supabaseClient";
 
@@ -26,6 +26,7 @@ function LossesTab({ establishmentId, isAdmin }) {
   return (
     <div className="stack">
       <RepeatingSection title="Predator losses" table="predator_losses" establishmentId={establishmentId} isAdmin={isAdmin}
+        linkedStatus="deceased"
         fields={[
           { key: "species", label: "Species", type: "select", options: ["cattle", "sheep", "goats"] },
           { key: "predator", label: "Predator", type: "text" },
@@ -35,6 +36,7 @@ function LossesTab({ establishmentId, isAdmin }) {
         renderRow={(r) => `${r.date} — ${r.species} — ${r.predator} — ${r.number_lost} lost`} />
 
       <RepeatingSection title="Theft" table="theft_losses" establishmentId={establishmentId} isAdmin={isAdmin}
+        linkedStatus="stolen"
         fields={[
           { key: "species", label: "Species", type: "text" },
           { key: "number_stolen", label: "Number stolen", type: "number" },
@@ -43,7 +45,7 @@ function LossesTab({ establishmentId, isAdmin }) {
         renderRow={(r) => `${r.date} — ${r.species} — ${r.number_stolen} stolen`} />
 
       <RepeatingSection title="Disease sickness / deaths" table="disease_records" establishmentId={establishmentId} isAdmin={isAdmin}
-        extra={{ record_type: "disease" }}
+        extra={{ record_type: "disease" }} linkedStatus="deceased"
         fields={[
           { key: "animal_type", label: "Animal type", type: "select", options: ["cattle", "sheep", "goats", "other"] },
           { key: "disease", label: "Disease", type: "text" },
@@ -54,7 +56,7 @@ function LossesTab({ establishmentId, isAdmin }) {
         renderRow={(r) => `${r.date} — ${r.animal_type} — ${r.disease} — sick ${r.no_sick} / dead ${r.no_dead}`} />
 
       <RepeatingSection title="Unknown-cause sickness / nervous signs" table="disease_records" establishmentId={establishmentId} isAdmin={isAdmin}
-        extra={{ record_type: "unknown_cause" }}
+        extra={{ record_type: "unknown_cause" }} linkedStatus="deceased"
         fields={[
           { key: "animal_type", label: "Animal type", type: "text" },
           { key: "clinical_signs", label: "Clinical signs", type: "text" },
@@ -247,10 +249,13 @@ function FeedTab({ establishmentId, isAdmin }) {
   );
 }
 
-function RepeatingSection({ title, table, establishmentId, isAdmin, extra = {}, fields, renderRow }) {
+function RepeatingSection({ title, table, establishmentId, isAdmin, extra = {}, fields, renderRow, linkedStatus }) {
   const [rows, setRows] = useState([]);
-  const [form, setForm] = useState(Object.fromEntries(fields.map((f) => [f.key, f.default || ""])));
+  const [animals, setAnimals] = useState([]);
+  const emptyForm = () => ({ ...Object.fromEntries(fields.map((f) => [f.key, f.default || ""])), animal_ids: [] });
+  const [form, setForm] = useState(emptyForm());
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
 
   useEffect(() => { load(); }, [establishmentId]);
   async function load() {
@@ -258,32 +263,90 @@ function RepeatingSection({ title, table, establishmentId, isAdmin, extra = {}, 
     if (extra.record_type) q = q.eq("record_type", extra.record_type);
     const { data } = await q.order("date", { ascending: false });
     setRows(data || []);
+    if (linkedStatus) {
+      const { data: a } = await supabase.from("animals").select("id, eartag_number, species, status")
+        .eq("establishment_id", establishmentId).in("status", ["active", linkedStatus]);
+      setAnimals(a || []);
+    }
   }
 
-  async function addRow() {
-    const payload = { ...form, ...extra, establishment_id: establishmentId };
-    fields.forEach((f) => { if (f.type === "number") payload[f.key] = parseInt(payload[f.key]) || 0; });
-    await supabase.from(table).insert(payload);
-    setForm(Object.fromEntries(fields.map((f) => [f.key, f.default || ""])));
+  function openAdd() {
+    setEditingId(null);
+    setForm(emptyForm());
+    setShowForm(true);
+  }
+
+  function openEdit(r) {
+    setEditingId(r.id);
+    setForm({ ...Object.fromEntries(fields.map((f) => [f.key, r[f.key] ?? (f.default || "")])), animal_ids: r.animal_ids || [] });
+    setShowForm(true);
+  }
+
+  function toggleAnimal(id) {
+    setForm((f) => ({ ...f, animal_ids: f.animal_ids.includes(id) ? f.animal_ids.filter((x) => x !== id) : [...f.animal_ids, id] }));
+  }
+
+  async function saveRow() {
+    const payload = { ...extra, establishment_id: establishmentId };
+    fields.forEach((f) => { payload[f.key] = f.type === "number" ? (parseInt(form[f.key]) || 0) : form[f.key]; });
+    payload.animal_ids = form.animal_ids;
+
+    const previousIds = editingId ? (rows.find((r) => r.id === editingId)?.animal_ids || []) : [];
+    const nextIds = form.animal_ids;
+
+    if (editingId) {
+      await supabase.from(table).update(payload).eq("id", editingId);
+    } else {
+      await supabase.from(table).insert(payload);
+    }
+
+    if (linkedStatus) {
+      const removed = previousIds.filter((id) => !nextIds.includes(id));
+      const added = nextIds.filter((id) => !previousIds.includes(id));
+      if (removed.length) await supabase.from("animals").update({ status: "active" }).in("id", removed);
+      if (added.length) await supabase.from("animals").update({ status: linkedStatus }).in("id", added);
+    }
+
+    setForm(emptyForm());
+    setEditingId(null);
     setShowForm(false);
     load();
   }
-  async function removeRow(id) {
-    await supabase.from(table).delete().eq("id", id);
+
+  async function removeRow(r) {
+    if (!confirm("Delete this record? Any linked animals will be set back to active.")) return;
+    if (linkedStatus && r.animal_ids?.length) {
+      await supabase.from("animals").update({ status: "active" }).in("id", r.animal_ids);
+    }
+    await supabase.from(table).delete().eq("id", r.id);
     load();
   }
+
+  const eartagFor = (id) => animals.find((a) => a.id === id)?.eartag_number || "?";
 
   return (
     <div className="card" style={{ padding: 16 }}>
       <div className="row-between" style={{ marginBottom: 8 }}>
         <div className="field-label">{title}</div>
-        {isAdmin && <button onClick={() => setShowForm(!showForm)} style={{ background: "none", border: "none", color: "var(--green)", cursor: "pointer" }}><Plus size={18} /></button>}
+        {isAdmin && <button onClick={() => (showForm && !editingId ? setShowForm(false) : openAdd())} style={{ background: "none", border: "none", color: "var(--green)", cursor: "pointer" }}><Plus size={18} /></button>}
       </div>
       {rows.length === 0 && !showForm && <p style={{ fontSize: 13, color: "var(--ink-soft)" }}>None recorded</p>}
       {rows.map((r) => (
-        <div key={r.id} className="row-between" style={{ padding: "6px 0", borderTop: "1px solid var(--line)", fontSize: 13 }}>
-          <span>{renderRow(r)}</span>
-          {isAdmin && <button onClick={() => removeRow(r.id)} style={{ background: "none", border: "none", color: "var(--red)", cursor: "pointer" }}><Trash2 size={14} /></button>}
+        <div key={r.id} className="row-between" style={{ padding: "6px 0", borderTop: "1px solid var(--line)", fontSize: 13, alignItems: "flex-start" }}>
+          <span>
+            {renderRow(r)}
+            {linkedStatus && r.animal_ids?.length > 0 && (
+              <span className="font-tag" style={{ display: "block", fontSize: 11, color: "var(--ink-soft)", marginTop: 2 }}>
+                tagged: {r.animal_ids.map(eartagFor).join(", ")}
+              </span>
+            )}
+          </span>
+          {isAdmin && (
+            <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+              <button onClick={() => openEdit(r)} style={{ background: "none", border: "none", color: "var(--ink-soft)", cursor: "pointer" }}><Pencil size={13} /></button>
+              <button onClick={() => removeRow(r)} style={{ background: "none", border: "none", color: "var(--red)", cursor: "pointer" }}><Trash2 size={13} /></button>
+            </div>
+          )}
         </div>
       ))}
       {showForm && (
@@ -301,7 +364,21 @@ function RepeatingSection({ title, table, establishmentId, isAdmin, extra = {}, 
               )}
             </div>
           ))}
-          <button className="btn btn-primary" onClick={addRow}>Add</button>
+          {linkedStatus && (
+            <div className="field">
+              <span className="field-label">Affected animals (optional — links specific eartags so they're removed from the active herd)</span>
+              <div style={{ maxHeight: 160, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 8, padding: 8 }}>
+                {animals.length === 0 && <p style={{ fontSize: 12, color: "var(--ink-soft)" }}>No active animals to select.</p>}
+                {animals.filter((a) => a.status === "active" || form.animal_ids.includes(a.id)).map((a) => (
+                  <label key={a.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 13 }}>
+                    <input type="checkbox" checked={form.animal_ids.includes(a.id)} onChange={() => toggleAnimal(a.id)} />
+                    <span className="font-tag">{a.eartag_number}</span> <span style={{ color: "var(--ink-soft)" }}>· {a.species}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+          <button className="btn btn-primary" onClick={saveRow}>{editingId ? "Save changes" : "Add"}</button>
         </div>
       )}
     </div>
