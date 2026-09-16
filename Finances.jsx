@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Plus, X, ArrowUpCircle, ArrowDownCircle, Pencil, Trash2 } from "lucide-react";
+import { Plus, X, ArrowUpCircle, ArrowDownCircle, Pencil, Trash2, Printer } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, PieChart, Pie, Cell, Legend } from "recharts";
 import { supabase } from "./supabaseClient";
 import { dbRead, dbWrite } from "./offline";
@@ -79,10 +79,13 @@ export default function Finances({ establishmentId, owners, isAdmin }) {
       <div className="tabs">
         <button className={`tab ${view === "list" ? "active" : ""}`} onClick={() => setView("list")}>Transactions</button>
         <button className={`tab ${view === "reports" ? "active" : ""}`} onClick={() => setView("reports")}>Reports</button>
+        <button className={`tab ${view === "statement" ? "active" : ""}`} onClick={() => setView("statement")}>Statement</button>
       </div>
 
       {view === "reports" ? (
         <FinanceReports txns={txns} />
+      ) : view === "statement" ? (
+        <IncomeExpenditureStatement txns={txns} />
       ) : (
         <>
           <div className="tabs">
@@ -189,6 +192,116 @@ function FinanceReports({ txns }) {
           </ResponsiveContainer>
         </div>
       )}
+    </div>
+  );
+}
+
+function IncomeExpenditureStatement({ txns }) {
+  const thisYear = new Date().getFullYear();
+  const [from, setFrom] = useState(`${thisYear}-01-01`);
+  const [to, setTo] = useState(todayISO());
+  const [printing, setPrinting] = useState(false);
+
+  const inRange = useMemo(() => txns.filter((t) => t.date >= from && t.date <= to), [txns, from, to]);
+
+  const income = useMemo(() => {
+    const map = {};
+    INCOME_CATEGORIES.forEach((c) => { map[c] = 0; });
+    inRange.filter((t) => t.type === "income").forEach((t) => { map[t.category] = (map[t.category] || 0) + Number(t.amount); });
+    return map;
+  }, [inRange]);
+
+  const expense = useMemo(() => {
+    const map = {};
+    EXPENSE_CATEGORIES.forEach((c) => { map[c] = 0; });
+    inRange.filter((t) => t.type === "expense").forEach((t) => { map[t.category] = (map[t.category] || 0) + Number(t.amount); });
+    return map;
+  }, [inRange]);
+
+  const totalIncome = Object.values(income).reduce((s, v) => s + v, 0);
+  const totalExpense = Object.values(expense).reduce((s, v) => s + v, 0);
+  const net = totalIncome - totalExpense;
+
+  function printStatement() {
+    setPrinting(true);
+    const row = (label, val, bold) => `<tr><td${bold ? ' style="font-weight:700"' : ""}>${label}</td><td${bold ? ' style="font-weight:700"' : ""}>${fmt(val)}</td></tr>`;
+    const html = `
+<!doctype html><html><head><meta charset="utf-8"><title>Income & Expenditure Statement</title>
+<style>
+  body { font-family: Georgia, serif; color: #1A2E1A; padding: 30px; max-width: 700px; margin: 0 auto; }
+  h1 { font-size: 20px; margin-bottom: 2px; }
+  h2 { font-size: 14px; margin: 20px 0 6px; border-bottom: 2px solid #2C5F2D; padding-bottom: 4px; }
+  .sub { color: #666; font-size: 13px; margin-bottom: 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td { padding: 5px 8px; border-bottom: 1px solid #eee; }
+  td:last-child { text-align: right; }
+  .total-row td { border-top: 2px solid #2C5F2D; border-bottom: none; padding-top: 8px; }
+  .net { font-size: 16px; font-weight: 700; padding: 14px 8px; background: #F4F7F2; margin-top: 14px; display: flex; justify-content: space-between; }
+  @media print { body { padding: 0; } }
+</style></head><body>
+  <h1>Income & Expenditure Statement</h1>
+  <p class="sub">${from} to ${to} &nbsp;·&nbsp; Printed ${new Date().toLocaleDateString()}</p>
+
+  <h2>Income</h2>
+  <table>
+    ${INCOME_CATEGORIES.map((c) => row(c, income[c] || 0)).join("")}
+    <tr class="total-row">${row("Total Income", totalIncome, true)}</tr>
+  </table>
+
+  <h2>Expenditure</h2>
+  <table>
+    ${EXPENSE_CATEGORIES.map((c) => row(c, expense[c] || 0)).join("")}
+    <tr class="total-row">${row("Total Expenditure", totalExpense, true)}</tr>
+  </table>
+
+  <div class="net"><span>NET ${net >= 0 ? "SURPLUS" : "DEFICIT"}</span><span>${fmt(Math.abs(net))}</span></div>
+</body></html>`;
+    const w = window.open("", "_blank");
+    w.document.write(html);
+    w.document.close();
+    setPrinting(false);
+    setTimeout(() => w.print(), 300);
+  }
+
+  return (
+    <div className="stack">
+      <div className="card" style={{ padding: 16 }}>
+        <div className="row-between" style={{ marginBottom: 10 }}>
+          <div className="field-label">Period</div>
+          <button className="btn btn-secondary" disabled={printing} onClick={printStatement} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, padding: "6px 10px" }}>
+            <Printer size={13} /> {printing ? "Preparing…" : "Print / Save as PDF"}
+          </button>
+        </div>
+        <div className="grid-2">
+          <div className="field"><span className="field-label">From</span><input type="date" className="input" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
+          <div className="field"><span className="field-label">To</span><input type="date" className="input" value={to} onChange={(e) => setTo(e.target.value)} /></div>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: 16 }}>
+        <div className="field-label" style={{ marginBottom: 8, color: "var(--green)" }}>Income</div>
+        {INCOME_CATEGORIES.map((c) => (
+          <div key={c} className="row-between" style={{ fontSize: 13, padding: "4px 0" }}><span>{c}</span><span className="font-tag">{fmt(income[c] || 0)}</span></div>
+        ))}
+        <div className="row-between" style={{ fontSize: 14, fontWeight: 700, padding: "8px 0 0", marginTop: 6, borderTop: "1px solid var(--line)" }}>
+          <span>Total Income</span><span className="font-tag" style={{ color: "var(--green)" }}>{fmt(totalIncome)}</span>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: 16 }}>
+        <div className="field-label" style={{ marginBottom: 8, color: "var(--rust)" }}>Expenditure</div>
+        {EXPENSE_CATEGORIES.map((c) => (
+          <div key={c} className="row-between" style={{ fontSize: 13, padding: "4px 0" }}><span>{c}</span><span className="font-tag">{fmt(expense[c] || 0)}</span></div>
+        ))}
+        <div className="row-between" style={{ fontSize: 14, fontWeight: 700, padding: "8px 0 0", marginTop: 6, borderTop: "1px solid var(--line)" }}>
+          <span>Total Expenditure</span><span className="font-tag" style={{ color: "var(--rust)" }}>{fmt(totalExpense)}</span>
+        </div>
+      </div>
+
+      <div className="stat-card">
+        <div className="stat-label">Net {net >= 0 ? "Surplus" : "Deficit"}</div>
+        <div className="stat-value" style={{ color: net >= 0 ? "var(--green)" : "var(--red)" }}>{fmt(Math.abs(net))}</div>
+      </div>
     </div>
   );
 }
