@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { ChevronLeft, RefreshCw } from "lucide-react";
+import { ChevronLeft, RefreshCw, Printer } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
 const PERIOD_LABEL = { jan_jun: "Jan – Jun", jul_dec: "Jul – Dec" };
@@ -14,11 +14,109 @@ function ageYears(dob) {
 
 export default function DeclarationDetail({ declaration, isAdmin, onBack }) {
   const [tab, setTab] = useState("overview");
+  const [printing, setPrinting] = useState(false);
+
+  async function printDeclaration() {
+    setPrinting(true);
+    const eid = declaration.establishment_id;
+    const { start, end } = periodRange(declaration.period, declaration.year);
+    const [{ data: numbers }, { data: flags }, { data: medFlags }, { data: predators }, { data: thefts }, { data: diseases }, { data: slaughters }, { data: feed }, { data: healthEvents }] = await Promise.all([
+      supabase.from("livestock_numbers").select("*").eq("declaration_id", declaration.id).maybeSingle(),
+      supabase.from("health_flags").select("*").eq("declaration_id", declaration.id).maybeSingle(),
+      supabase.from("medicine_flags").select("*").eq("declaration_id", declaration.id).maybeSingle(),
+      supabase.from("predator_losses").select("*").eq("establishment_id", eid).gte("date", start).lte("date", end),
+      supabase.from("theft_losses").select("*").eq("establishment_id", eid).gte("date", start).lte("date", end),
+      supabase.from("disease_records").select("*").eq("establishment_id", eid).gte("date", start).lte("date", end),
+      supabase.from("slaughter_records").select("*, animals(eartag_number, species)").eq("establishment_id", eid).gte("date", start).lte("date", end),
+      supabase.from("feed_register").select("*").eq("establishment_id", eid).gte("date", start).lte("date", end),
+      supabase.from("health_events").select("event_type").eq("establishment_id", eid).gte("date", start).lte("date", end),
+    ]);
+    const nums = numbers || await computeLivestockNumbers(eid);
+    const yn = (v) => v === true ? "Yes" : v === false ? "No" : "N/A";
+    const rows = (arr, fn) => arr.length ? arr.map(fn).join("") : `<tr><td colspan="99" style="color:#777">None recorded</td></tr>`;
+    const eventCounts = {};
+    (healthEvents || []).forEach((e) => { eventCounts[e.event_type] = (eventCounts[e.event_type] || 0) + 1; });
+
+    const html = `
+<!doctype html><html><head><meta charset="utf-8"><title>Declaration — ${PERIOD_LABEL[declaration.period]} ${declaration.year}</title>
+<style>
+  body { font-family: Georgia, serif; color: #1A2E1A; padding: 30px; max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 22px; margin-bottom: 2px; }
+  h2 { font-size: 15px; margin: 22px 0 8px; border-bottom: 2px solid #2C5F2D; padding-bottom: 4px; }
+  .sub { color: #666; font-size: 13px; margin-bottom: 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 4px; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid #ddd; }
+  th { background: #F4F7F2; }
+  .status { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; background: #F4F7F2; }
+  @media print { body { padding: 0; } }
+</style></head><body>
+  <h1>Animal Health Self-Declaration</h1>
+  <p class="sub">${PERIOD_LABEL[declaration.period]} ${declaration.year} &nbsp;·&nbsp; Status: <span class="status">${declaration.status}</span> &nbsp;·&nbsp; Printed ${new Date().toLocaleDateString()}</p>
+
+  <h2>Livestock Identification & Documentation</h2>
+  <table>
+    <tr><td>Cattle identified/marked</td><td>${yn(declaration.cattle_identified)}</td><td>Sheep identified/marked</td><td>${yn(declaration.sheep_identified)}</td></tr>
+    <tr><td>Goats identified/marked</td><td>${yn(declaration.goats_identified)}</td><td>Other identified/marked</td><td>${yn(declaration.other_identified)}</td></tr>
+    <tr><td>Livestock Register up to date</td><td>${yn(declaration.doc_livestock_register)}</td><td>Feed Register up to date</td><td>${yn(declaration.doc_feed_register)}</td></tr>
+    <tr><td>Vet Drug & Treatment Register</td><td>${yn(declaration.doc_vet_drug_register)}</td><td>Employee Training up to date</td><td>${yn(declaration.doc_employee_training)}</td></tr>
+    <tr><td>Departure & Arrival records</td><td>${yn(declaration.doc_departure_arrival)}</td><td>Movements reported to DVS</td><td>${yn(declaration.movements_up_to_date)}</td></tr>
+    <tr><td>Number of imported animals</td><td>${declaration.imported_animals_count || 0}</td><td></td><td></td></tr>
+  </table>
+
+  <h2>Livestock Numbers</h2>
+  <table>${NUMBER_FIELDS.map(([k, label]) => `<tr><td>${label}</td><td>${nums[k] ?? 0}</td></tr>`).join("")}</table>
+
+  <h2>Breeding (age/sex breakdown)</h2>
+  <table>${BREEDING_FIELDS.map(([k, label]) => `<tr><td>${label}</td><td>${nums[k] ?? 0}</td></tr>`).join("")}</table>
+
+  <h2>Losses & Disease — this period</h2>
+  <table>
+    <tr><th>Date</th><th>Type</th><th>Detail</th><th>Count</th></tr>
+    ${rows(predators || [], (p) => `<tr><td>${p.date}</td><td>Predator loss</td><td>${p.species} — ${p.predator}</td><td>${p.number_lost}</td></tr>`)}
+    ${rows(thefts || [], (t) => `<tr><td>${t.date}</td><td>Theft</td><td>${t.species}</td><td>${t.number_stolen}</td></tr>`)}
+    ${rows(diseases || [], (d) => `<tr><td>${d.date}</td><td>${d.record_type === "disease" ? "Disease" : "Unknown cause"}</td><td>${d.animal_type} — ${d.disease || d.clinical_signs || ""}</td><td>sick ${d.no_sick || 0} / dead ${d.no_dead || 0}</td></tr>`)}
+  </table>
+  <table style="margin-top:10px">
+    <tr><td>Abortions — cattle / sheep / goats</td><td>${flags?.abortions_cattle || 0} / ${flags?.abortions_sheep || 0} / ${flags?.abortions_goats || 0}</td></tr>
+    <tr><td>Suspected FMD</td><td>${yn(flags?.fmd_suspected)}</td></tr>
+    <tr><td>Suspected Sheep Scab</td><td>${yn(flags?.sheep_scab_suspected)}</td></tr>
+    <tr><td>Ticks — cattle</td><td>${yn(flags?.ticks_cattle)}</td></tr>
+    <tr><td>Ticks — sheep & goats</td><td>${yn(flags?.ticks_sheep_goats)}</td></tr>
+  </table>
+
+  <h2>Slaughter — this period</h2>
+  <table>
+    <tr><th>Eartag</th><th>Date</th><th>Weight</th><th>Purpose</th><th>Value</th></tr>
+    ${rows(slaughters || [], (s) => `<tr><td>${s.animals?.eartag_number || ""}</td><td>${s.date}</td><td>${s.weight_kg || "—"}kg</td><td>${s.purpose === "sold" ? "Sold" : "Own use"}</td><td>${s.total_value ? "N$ " + Number(s.total_value).toFixed(2) : "—"}</td></tr>`)}
+  </table>
+
+  <h2>Health Events & Feed — this period</h2>
+  <table>${Object.keys(eventCounts).length ? Object.entries(eventCounts).map(([t, n]) => `<tr><td style="text-transform:capitalize">${t}</td><td>${n}</td></tr>`).join("") : `<tr><td colspan="2" style="color:#777">No health events recorded</td></tr>`}</table>
+  <p style="font-size:13px; margin-top:8px;">Feed register entries: ${(feed || []).length}</p>
+  <table style="margin-top:6px">
+    <tr><td>Vet drugs stored correctly</td><td>${yn(medFlags?.vet_drugs_stored_correctly)}</td></tr>
+    <tr><td>Feed contains antibiotics</td><td>${yn(medFlags?.antibiotics_in_feed)}</td></tr>
+    <tr><td>Banned substances used</td><td>${yn(medFlags?.banned_substances_used)}</td></tr>
+  </table>
+</body></html>`;
+
+    const w = window.open("", "_blank");
+    w.document.write(html);
+    w.document.close();
+    setPrinting(false);
+    setTimeout(() => w.print(), 300);
+  }
+
   return (
     <div className="container">
-      <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: "var(--ink-soft)", fontSize: 14, fontWeight: 500, marginBottom: 12, cursor: "pointer" }}>
-        <ChevronLeft size={16} /> Back
-      </button>
+      <div className="row-between" style={{ marginBottom: 12 }}>
+        <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: "var(--ink-soft)", fontSize: 14, fontWeight: 500, cursor: "pointer" }}>
+          <ChevronLeft size={16} /> Back
+        </button>
+        <button onClick={printDeclaration} disabled={printing} className="btn btn-secondary" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, padding: "6px 12px" }}>
+          <Printer size={14} /> {printing ? "Preparing…" : "Print / Save as PDF"}
+        </button>
+      </div>
       <h2 className="font-display" style={{ fontSize: 22, fontWeight: 700 }}>{PERIOD_LABEL[declaration.period]} {declaration.year}</h2>
       <p style={{ fontSize: 13, color: "var(--ink-soft)", marginBottom: 12 }}>Farm-wide declaration — numbers are pulled from your records automatically, and can be adjusted before you submit.</p>
 
@@ -109,10 +207,11 @@ async function computeLivestockNumbers(establishmentId) {
   (animals || []).forEach((a) => {
     const cat = (a.breed_category || "").toLowerCase();
     const age = ageYears(a.dob);
+    const isMale = (a.sex || "").toString().trim().toUpperCase().startsWith("M");
     if (a.species === "cattle") {
       n.beef_cattle++;
-      if (age !== null && age < 1) { a.sex === "M" ? n.calves_male_lt1++ : n.calves_female_lt1++; }
-      else if (a.sex === "F") n.cows++; else n.bulls++;
+      if (age !== null && age < 1) { isMale ? n.calves_male_lt1++ : n.calves_female_lt1++; }
+      else if (!isMale) n.cows++; else n.bulls++;
     } else if (a.species === "sheep") {
       if (cat.includes("karakul")) n.karakul++; else if (cat.includes("dorper")) n.dorper++; else n.other_sheep++;
       if (age !== null && age >= 1) n.sheep_1yr_plus++;

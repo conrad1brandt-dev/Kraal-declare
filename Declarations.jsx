@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Plus, X, FileCheck } from "lucide-react";
+import { Plus, X, FileCheck, Trash2 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { dbRead } from "./offline";
 import DeclarationDetail from "./DeclarationDetail";
@@ -32,6 +32,13 @@ export default function Declarations({ establishmentId, isAdmin }) {
     if (!error) { await load(); setSelected(data); }
   }
 
+  async function deleteDeclaration(d, e) {
+    e.stopPropagation();
+    if (!confirm(`Delete the ${d.period === "jan_jun" ? "Jan–Jun" : "Jul–Dec"} ${d.year} declaration? This only removes the saved declaration itself — your underlying animal, loss, and health records are untouched.`)) return;
+    await supabase.from("declarations").delete().eq("id", d.id);
+    load();
+  }
+
   if (loading) return <div className="container">Loading declaration…</div>;
 
   if (selected) return <DeclarationDetail declaration={selected} isAdmin={isAdmin} onBack={() => { setSelected(null); load(); }} />;
@@ -56,6 +63,11 @@ export default function Declarations({ establishmentId, isAdmin }) {
                 </div>
               </div>
               <span className="badge" style={{ background: d.status === "submitted" ? "var(--green-soft)" : "var(--gold-soft)", color: d.status === "submitted" ? "var(--green)" : "#7A5A16" }}>{d.status}</span>
+              {isAdmin && (
+                <button onClick={(e) => deleteDeclaration(d, e)} style={{ background: "none", border: "none", color: "var(--red)", cursor: "pointer", marginLeft: 8 }}>
+                  <Trash2 size={15} />
+                </button>
+              )}
             </button>
           ))}
         </div>
