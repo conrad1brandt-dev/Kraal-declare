@@ -66,7 +66,8 @@ export default function FarmUpdate({ establishmentId, establishmentName, onBack 
           `  • Grazing: ${latestGrazing.grazing_quality} quality, ${latestGrazing.grazing_quantity} quantity`,
           `  • Water: ${latestGrazing.water_quality} quality, ${latestGrazing.water_quantity} quantity${(latestGrazing.water_sources || []).length ? ` — ${latestGrazing.water_sources.join(", ")}` : ""}`,
           `  • Condition: cattle ${latestGrazing.cattle_condition}, sheep ${latestGrazing.sheep_condition}, goats ${latestGrazing.goats_condition}`,
-        ]
+          latestGrazing.notes ? `  • Notes: ${latestGrazing.notes}` : undefined,
+        ].filter((l) => l !== undefined)
       : [`Grazing & Water: no reports logged yet`];
 
     const lines = [
