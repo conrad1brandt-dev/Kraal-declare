@@ -12,6 +12,9 @@ function daysAgoISO(days) {
 function prettyDate(iso) {
   return new Date(iso + "T00:00:00").toLocaleDateString("en-NA", { day: "numeric", month: "short", year: "numeric" });
 }
+function cap(s) {
+  return s ? s[0].toUpperCase() + s.slice(1) : s;
+}
 
 export default function FarmUpdate({ establishmentId, establishmentName, onBack }) {
   const [period, setPeriod] = useState(30);
@@ -25,13 +28,14 @@ export default function FarmUpdate({ establishmentId, establishmentName, onBack 
     const from = daysAgoISO(period);
     const to = todayISO();
 
-    const [{ data: animals }, { data: slaughters }, { data: txns }, { data: predators }, { data: thefts }, { data: diseases }] = await Promise.all([
+    const [{ data: animals }, { data: slaughters }, { data: txns }, { data: predators }, { data: thefts }, { data: diseases }, { data: grazingRows }] = await Promise.all([
       supabase.from("animals").select("species, status").eq("establishment_id", establishmentId).eq("status", "active"),
       supabase.from("slaughter_records").select("purpose, total_value").eq("establishment_id", establishmentId).gte("date", from).lte("date", to),
       supabase.from("transactions").select("type, amount").eq("establishment_id", establishmentId).gte("date", from).lte("date", to),
       supabase.from("predator_losses").select("number_lost").eq("establishment_id", establishmentId).gte("date", from).lte("date", to),
       supabase.from("theft_losses").select("number_stolen").eq("establishment_id", establishmentId).gte("date", from).lte("date", to),
       supabase.from("disease_records").select("no_dead").eq("establishment_id", establishmentId).gte("date", from).lte("date", to),
+      supabase.from("grazing_water_reports").select("*").eq("establishment_id", establishmentId).order("report_date", { ascending: false }).limit(1),
     ]);
 
     const herdBySpecies = {};
@@ -52,8 +56,18 @@ export default function FarmUpdate({ establishmentId, establishmentName, onBack 
 
     const speciesLines = Object.entries(herdBySpecies)
       .filter(([, c]) => c > 0)
-      .map(([sp, c]) => `  • ${sp[0].toUpperCase() + sp.slice(1)}: ${c}`)
+      .map(([sp, c]) => `  • ${cap(sp)}: ${c}`)
       .join("\n");
+
+    const latestGrazing = (grazingRows || [])[0];
+    const grazingLines = latestGrazing
+      ? [
+          `Grazing & Water (latest report, ${prettyDate(latestGrazing.report_date)}):`,
+          `  • Grazing: ${latestGrazing.grazing_quality} quality, ${latestGrazing.grazing_quantity} quantity`,
+          `  • Water: ${latestGrazing.water_quality} quality, ${latestGrazing.water_quantity} quantity${(latestGrazing.water_sources || []).length ? ` — ${latestGrazing.water_sources.join(", ")}` : ""}`,
+          `  • Condition: cattle ${latestGrazing.cattle_condition}, sheep ${latestGrazing.sheep_condition}, goats ${latestGrazing.goats_condition}`,
+        ]
+      : [`Grazing & Water: no reports logged yet`];
 
     const lines = [
       `🌾 ${establishmentName} — Farm Update`,
@@ -66,6 +80,8 @@ export default function FarmUpdate({ establishmentId, establishmentName, onBack 
       `  • ${soldCount + ownUseCount} animal(s) processed (${soldCount} sold, ${ownUseCount} own use) — ${fmt(salesValue)} in sales`,
       totalLosses > 0 ? `  • ${totalLosses} lost (${diseaseLoss} disease, ${predatorLoss} predator, ${theftLoss} theft)` : `  • No losses recorded`,
       `  • Finances: Income ${fmt(income)} · Expenses ${fmt(expense)} · Net ${fmt(income - expense)}`,
+      "",
+      ...grazingLines,
       "",
       `— Sent via Kraal Declare`,
     ].filter((l) => l !== undefined);
@@ -87,7 +103,7 @@ export default function FarmUpdate({ establishmentId, establishmentName, onBack 
       </button>
       <h2 className="font-display" style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>Farm Update</h2>
       <p style={{ fontSize: 13, color: "var(--ink-soft)", marginBottom: 16 }}>
-        Builds a summary from what's logged in the app — herd size, recent slaughter, losses, and finances — that you can send to the people you've given access to. This doesn't send anything automatically; you review it and share it yourself, however you like (WhatsApp, email, etc.).
+        Builds a summary from what's logged in the app — herd size, recent slaughter, losses, grazing & water conditions, and finances — that you can send to the people you've given access to. This doesn't send anything automatically; you review it and share it yourself, however you like (WhatsApp, email, etc.).
       </p>
 
       <div className="card" style={{ padding: 16, marginBottom: 16 }}>
