@@ -63,7 +63,7 @@ export default function Animals({ establishmentId, isAdmin }) {
   function exportCSV() {
     const header = ["owner", "eartag_number", "species", "breed_category", "sex", "dob", "status"];
     const lines = [header.join(",")];
-    for (const a of animals) {
+    for (const a of filtered) {
       const row = [
         a.owners?.full_name || "Farm (shared/communal)",
         a.eartag_number || "",
@@ -82,7 +82,7 @@ export default function Animals({ establishmentId, isAdmin }) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `animals-export-${todayISO()}.csv`;
+    link.download = `animals-export-${speciesFilter !== "all" ? speciesFilter + "-" : ""}${todayISO()}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
