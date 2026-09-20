@@ -103,24 +103,42 @@ function VetDrugRegister({ establishmentId, isAdmin }) {
   if (loading) return <p>Loading…</p>;
   return (
     <div>
-      <p style={{ fontSize: 13, color: "var(--ink-soft)", marginBottom: 8 }}>
-        Data capture is ready — batch number and withdrawal period included. A polished printable report for this register is coming in a follow-up.
-      </p>
-      {isAdmin && <button className="btn btn-primary" style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }} onClick={() => setShowAdd(true)}><Plus size={14} /> Add entry</button>}
-      {rows.length === 0 ? <p style={{ fontSize: 13, color: "var(--ink-soft)" }}>No entries yet</p> : (
-        <div className="card" style={{ overflow: "hidden" }}>
-          {rows.map((r) => (
-            <div key={r.id} className="list-row">
-              <div>
-                <div style={{ fontWeight: 500, fontSize: 14 }}>{r.event_type} {r.animals?.eartag_number ? `— ${r.animals.eartag_number}` : r.species ? `— ${r.species}` : ""}</div>
-                <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                  {r.date}{r.batch_no ? ` · batch ${r.batch_no}` : ""}{r.withdrawal_end ? ` · withdrawal until ${r.withdrawal_end}` : ""}{r.note ? ` · ${r.note}` : ""}
-                </div>
-              </div>
-              {isAdmin && <button onClick={() => removeEntry(r.id)} style={{ background: "none", border: "none", color: "var(--red)", cursor: "pointer" }}><Trash2 size={14} /></button>}
-            </div>
-          ))}
+      <div className="row-between no-print" style={{ marginBottom: 12 }}>
+        <p style={{ fontSize: 13, color: "var(--ink-soft)" }}>{rows.length} entries</p>
+        <div style={{ display: "flex", gap: 8 }}>
+          {isAdmin && <button className="btn btn-primary" style={{ display: "flex", alignItems: "center", gap: 6 }} onClick={() => setShowAdd(true)}><Plus size={14} /> Add entry</button>}
+          <button className="btn btn-secondary" style={{ display: "flex", alignItems: "center", gap: 6 }} onClick={() => window.print()}><Printer size={14} /> Print / Save as PDF</button>
         </div>
+      </div>
+      <h3 className="font-display" style={{ marginBottom: 8 }}>Vet Drug & Treatment Register</h3>
+      {rows.length === 0 ? <p style={{ fontSize: 13, color: "var(--ink-soft)" }}>No entries yet</p> : (
+        <table className="register-table">
+          <thead>
+            <tr>
+              <th>Date</th><th>Type</th><th>Animal / Species</th><th>Medicine & batch no.</th>
+              <th>Withdrawal ends</th><th>Owner</th><th>Note</th>
+              {isAdmin && <th className="no-print"></th>}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id}>
+                <td className="font-tag">{r.date}</td>
+                <td style={{ textTransform: "capitalize" }}>{r.event_type}</td>
+                <td>{r.animals?.eartag_number ? <span className="font-tag">{r.animals.eartag_number}</span> : (r.species || "—")}</td>
+                <td>{r.batch_no || "—"}</td>
+                <td>{r.withdrawal_end || "—"}</td>
+                <td>{r.owners?.full_name || "—"}</td>
+                <td>{r.note || "—"}</td>
+                {isAdmin && (
+                  <td className="no-print">
+                    <button onClick={() => removeEntry(r.id)} style={{ background: "none", border: "none", color: "var(--red)", cursor: "pointer" }}><Trash2 size={14} /></button>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
       {showAdd && <VetDrugModal onClose={() => setShowAdd(false)} onSave={addEntry} />}
     </div>
