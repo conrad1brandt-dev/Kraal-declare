@@ -282,21 +282,26 @@ function SettingsScreen({ establishment, isAdmin, onEstablishmentChange }) {
         <div className="field-label" style={{ marginBottom: 6 }}>Your access</div>
         <p style={{ fontSize: 14 }}>{isAdmin ? "Full access — you can add, edit, and delete records." : "View only — you can see everything, but only the admin can make changes."}</p>
       </div>
-      <div className="card" style={{ padding: 20, marginBottom: 16 }}>
-        <div className="field-label" style={{ marginBottom: 6 }}>Invite code</div>
-        <p style={{ fontSize: 13, color: "var(--ink-soft)", marginBottom: 12 }}>Share this with anyone who should have access.</p>
-        <div className="row-between" style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 8, padding: "10px 14px" }}>
-          <span className="font-tag" style={{ fontSize: 16, fontWeight: 600 }}>{establishment.invite_code}</span>
-          <button onClick={copyCode} style={{ background: "none", border: "none", color: "var(--ink-soft)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 13 }}>
-            {copied ? <><Check size={14} /> Copied</> : <><Copy size={14} /> Copy</>}
-          </button>
-        </div>
-        {isAdmin && (
+      {isAdmin ? (
+        <div className="card" style={{ padding: 20, marginBottom: 16 }}>
+          <div className="field-label" style={{ marginBottom: 6 }}>Invite code</div>
+          <p style={{ fontSize: 13, color: "var(--ink-soft)", marginBottom: 12 }}>Share this with anyone who should have access.</p>
+          <div className="row-between" style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 8, padding: "10px 14px" }}>
+            <span className="font-tag" style={{ fontSize: 16, fontWeight: 600 }}>{establishment.invite_code}</span>
+            <button onClick={copyCode} style={{ background: "none", border: "none", color: "var(--ink-soft)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 13 }}>
+              {copied ? <><Check size={14} /> Copied</> : <><Copy size={14} /> Copy</>}
+            </button>
+          </div>
           <button className="btn btn-secondary" style={{ width: "100%", marginTop: 10, fontSize: 13 }} disabled={regenerating} onClick={regenerateCode}>
             {regenerating ? "Generating…" : "Generate a new code"}
           </button>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="card" style={{ padding: 20, marginBottom: 16 }}>
+          <div className="field-label" style={{ marginBottom: 6 }}>Invite code</div>
+          <p style={{ fontSize: 13, color: "var(--ink-soft)" }}>Only the admin can view or share the invite code.</p>
+        </div>
+      )}
       {isAdmin && (
         <div className="card" style={{ padding: 20, marginBottom: 16 }}>
           <div className="field-label" style={{ marginBottom: 6 }}>People with access ({members.length})</div>
