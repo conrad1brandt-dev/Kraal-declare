@@ -63,7 +63,7 @@ export default function Slaughter({ establishmentId, isAdmin }) {
         purpose: form.purpose,
         price_per_kg: form.purpose === "sold" ? form.price_per_kg || null : null,
         total_value: totalValue,
-        buyer_name: form.purpose === "sold" ? form.buyer_name || null : null,
+        buyer_name: form.buyer_name || null,
         buyer_contact: form.purpose === "sold" ? form.buyer_contact || null : null,
         linked_transaction_id: linkedTxnId,
       }),
@@ -112,7 +112,7 @@ export default function Slaughter({ establishmentId, isAdmin }) {
       purpose: form.purpose,
       price_per_kg: form.purpose === "sold" ? form.price_per_kg || null : null,
       total_value: totalValue,
-      buyer_name: form.purpose === "sold" ? form.buyer_name || null : null,
+      buyer_name: form.buyer_name || null,
       buyer_contact: form.purpose === "sold" ? form.buyer_contact || null : null,
       linked_transaction_id: linkedTxnId,
     }).eq("id", record.id);
@@ -182,10 +182,12 @@ export default function Slaughter({ establishmentId, isAdmin }) {
                 <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
                   {r.date} · {r.weight_kg ? `${r.weight_kg}kg` : "no weight"} · {r.purpose === "sold" ? "Sold" : "Own consumption"}
                 </div>
-                {r.purpose === "sold" && (
+                {r.purpose === "sold" ? (
                   <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
                     {r.buyer_name} · N$ {Number(r.price_per_kg).toFixed(2)}/kg → N$ {Number(r.total_value).toFixed(2)}
                   </div>
+                ) : (
+                  r.buyer_name && <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>{r.buyer_name}</div>
                 )}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -228,7 +230,7 @@ export default function Slaughter({ establishmentId, isAdmin }) {
                 <h3 className="font-display" style={{ fontSize: 17, marginBottom: 8 }}>{g.name}</h3>
                 <table className="register-table">
                   <thead>
-                    <tr><th>Animal</th><th>Date</th><th>Weight</th><th>Usage</th><th>Buyer</th><th>Price/kg</th><th>Total</th></tr>
+                    <tr><th>Animal</th><th>Date</th><th>Weight</th><th>Usage</th><th>Buyer / Notes</th><th>Price/kg</th><th>Total</th></tr>
                   </thead>
                   <tbody>
                     {g.rows.map((r) => {
@@ -239,7 +241,7 @@ export default function Slaughter({ establishmentId, isAdmin }) {
                           <td>{r.date}</td>
                           <td>{r.weight_kg ? `${r.weight_kg}kg` : "—"}</td>
                           <td>{r.purpose === "sold" ? "Sold" : "Own use"}</td>
-                          <td>{r.purpose === "sold" ? (r.buyer_name || "—") : "—"}</td>
+                          <td>{r.buyer_name || "—"}</td>
                           <td>{r.purpose === "sold" && r.price_per_kg ? `N$ ${Number(r.price_per_kg).toFixed(2)}` : "—"}</td>
                           <td>
                             {r.purpose === "sold"
@@ -319,13 +321,15 @@ function AddSlaughterModal({ animals, onClose, onSave }) {
             <button className={`tab ${form.purpose === "own_consumption" ? "active" : ""}`} style={{ flex: 1 }} onClick={() => set("purpose", "own_consumption")}>Own consumption</button>
             <button className={`tab ${form.purpose === "sold" ? "active" : ""}`} style={{ flex: 1 }} onClick={() => set("purpose", "sold")}>Sold</button>
           </div>
-          {form.purpose === "sold" && (
+          {form.purpose === "sold" ? (
             <>
               <div className="field"><span className="field-label">Price per kg (N$)</span><input type="number" className="input" value={form.price_per_kg} onChange={(e) => set("price_per_kg", e.target.value)} /></div>
               {total && <p style={{ fontSize: 13, color: "var(--green)", fontWeight: 600 }}>Total: N$ {total}</p>}
               <div className="field"><span className="field-label">Buyer name</span><input className="input" value={form.buyer_name} onChange={(e) => set("buyer_name", e.target.value)} /></div>
               <div className="field"><span className="field-label">Buyer contact</span><input className="input" value={form.buyer_contact} onChange={(e) => set("buyer_contact", e.target.value)} /></div>
             </>
+          ) : (
+            <div className="field"><span className="field-label">Notes (optional)</span><input className="input" placeholder="e.g. Church donation — St. Mary's" value={form.buyer_name} onChange={(e) => set("buyer_name", e.target.value)} /></div>
           )}
           <button className="btn btn-primary" disabled={!form.animal_id} onClick={save}>Save record</button>
         </div>
@@ -381,13 +385,15 @@ function EditSlaughterModal({ record, animals, onClose, onSave }) {
             <button className={`tab ${form.purpose === "own_consumption" ? "active" : ""}`} style={{ flex: 1 }} onClick={() => set("purpose", "own_consumption")}>Own consumption</button>
             <button className={`tab ${form.purpose === "sold" ? "active" : ""}`} style={{ flex: 1 }} onClick={() => set("purpose", "sold")}>Sold</button>
           </div>
-          {form.purpose === "sold" && (
+          {form.purpose === "sold" ? (
             <>
               <div className="field"><span className="field-label">Price per kg (N$)</span><input type="number" className="input" value={form.price_per_kg} onChange={(e) => set("price_per_kg", e.target.value)} /></div>
               {total && <p style={{ fontSize: 13, color: "var(--green)", fontWeight: 600 }}>Total: N$ {total}</p>}
               <div className="field"><span className="field-label">Buyer name</span><input className="input" value={form.buyer_name} onChange={(e) => set("buyer_name", e.target.value)} /></div>
               <div className="field"><span className="field-label">Buyer contact</span><input className="input" value={form.buyer_contact} onChange={(e) => set("buyer_contact", e.target.value)} /></div>
             </>
+          ) : (
+            <div className="field"><span className="field-label">Notes (optional)</span><input className="input" placeholder="e.g. Church donation — St. Mary's" value={form.buyer_name} onChange={(e) => set("buyer_name", e.target.value)} /></div>
           )}
           <button className="btn btn-primary" disabled={!form.animal_id} onClick={save}>Save changes</button>
         </div>
