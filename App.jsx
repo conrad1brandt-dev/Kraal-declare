@@ -65,23 +65,45 @@ export default function App() {
   const [screen, setScreen] = useState("home");
   const [online, setOnline] = useState(isOnline());
   const [pending, setPending] = useState(queueLength());
+  const [loadError, setLoadError] = useState(false);
 
   const isAdmin = role === "owner_admin";
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      if (data.session?.user) {
-        supabase.from("profiles").upsert({ id: data.session.user.id, email: data.session.user.email, updated_at: new Date().toISOString() }).then(() => {});
+      let sess = data?.session || null;
+      if (sess?.user) {
+        try { localStorage.setItem("kd_last_user", JSON.stringify({ id: sess.user.id, email: sess.user.email })); } catch {}
+      } else if (!navigator.onLine) {
+        // Offline and the saved login could not be refreshed: reuse the last known user so the app still opens.
+        try {
+          const u = JSON.parse(localStorage.getItem("kd_last_user"));
+          if (u?.id) sess = { user: u, offlineOnly: true };
+        } catch {}
+      }
+      setSession(sess);
+      if (sess?.user && !sess.offlineOnly) {
+        supabase.from("profiles").upsert({ id: sess.user.id, email: sess.user.email, updated_at: new Date().toISOString() }).then(() => {});
       }
     });
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((evt, s) => {
+      if (evt === "SIGNED_OUT") {
+        try {
+          Object.keys(localStorage).filter((k) => k === "kd_last_user" || k.startsWith("kd_membership_") || k.startsWith("kd_owners_")).forEach((k) => localStorage.removeItem(k));
+        } catch {}
+      }
+      if (!s && evt !== "SIGNED_OUT" && !navigator.onLine) return; // keep the offline session
       setSession(s);
       if (s?.user) {
+        try { localStorage.setItem("kd_last_user", JSON.stringify({ id: s.user.id, email: s.user.email })); } catch {}
         supabase.from("profiles").upsert({ id: s.user.id, email: s.user.email, updated_at: new Date().toISOString() }).then(() => {});
       }
     });
-    const goOnline = () => { setOnline(true); if (establishment?.id) flushQueue(buildQueueExecutors(establishment.id)).then(() => setPending(queueLength())); };
+    const goOnline = () => {
+      setOnline(true);
+      supabase.auth.getSession().then(({ data }) => { if (data?.session) setSession(data.session); });
+      if (establishment?.id) flushQueue(buildQueueExecutors(establishment.id)).then(() => setPending(queueLength()));
+    };
     const goOffline = () => setOnline(false);
     window.addEventListener("online", goOnline);
     window.addEventListener("offline", goOffline);
@@ -105,25 +127,72 @@ export default function App() {
   }, [session]);
 
   async function loadEstablishment() {
-    const { data } = await supabase
-      .from("establishment_members")
-      .select("establishment_id, role, establishments(*)")
-      .eq("user_id", session.user.id)
-      .limit(1)
-      .maybeSingle();
+    const cacheKey = `kd_membership_${session.user.id}`;
+    let result;
+    try {
+      result = await supabase
+        .from("establishment_members")
+        .select("establishment_id, role, establishments(*)")
+        .eq("user_id", session.user.id)
+        .limit(1)
+        .maybeSingle();
+    } catch (e) {
+      result = { error: e };
+    }
+    if (result.error) {
+      // No signal / server unreachable: use the saved copy of the farm instead of showing setup.
+      let cached = null;
+      try { cached = JSON.parse(localStorage.getItem(cacheKey)); } catch {}
+      if (cached?.establishment) {
+        setLoadError(false);
+        setEstablishment(cached.establishment);
+        setRole(cached.role);
+      } else {
+        setLoadError(true);
+      }
+      return;
+    }
+    setLoadError(false);
+    const data = result.data;
+    try {
+      if (data) localStorage.setItem(cacheKey, JSON.stringify({ establishment: data.establishments, role: data.role }));
+      else localStorage.removeItem(cacheKey);
+    } catch {}
     setEstablishment(data ? data.establishments : null);
     setRole(data ? data.role : null);
   }
 
   useEffect(() => {
     if (establishment) {
+      const ownersKey = `kd_owners_${establishment.id}`;
       supabase.from("owners").select("id, full_name, brand_marks(*)").eq("establishment_id", establishment.id)
-        .then(({ data }) => setOwners(data || []));
+        .then(({ data, error }) => {
+          if (!error && data) {
+            setOwners(data);
+            try { localStorage.setItem(ownersKey, JSON.stringify(data)); } catch {}
+          } else {
+            try { const c = JSON.parse(localStorage.getItem(ownersKey)); if (c) setOwners(c); } catch {}
+          }
+        })
+        .catch(() => {
+          try { const c = JSON.parse(localStorage.getItem(ownersKey)); if (c) setOwners(c); } catch {}
+        });
     }
   }, [establishment, screen]);
 
   if (session === undefined) return <div className="container" style={{ paddingTop: 80 }}>Loading…</div>;
   if (!session) return <Auth onAuthed={() => {}} />;
+  if (loadError && !establishment) {
+    return (
+      <div className="container" style={{ paddingTop: 80 }}>
+        <h2 style={{ marginBottom: 8 }}>Can't reach the server</h2>
+        <p style={{ color: "var(--ink-soft)", marginBottom: 16 }}>
+          Your farm hasn't been saved on this phone yet. Open the app once with signal, then it will work offline.
+        </p>
+        <button className="btn" onClick={() => loadEstablishment()}>Try again</button>
+      </div>
+    );
+  }
   if (establishment === undefined) return <div className="container" style={{ paddingTop: 80 }}>Loading your establishment…</div>;
   if (!establishment) return <EstablishmentSetup user={session.user} onReady={setEstablishment} />;
 
