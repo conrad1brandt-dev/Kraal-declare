@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Home as HomeIcon, PawPrint, Wallet, FileCheck, Menu, WifiOff, LogOut, Copy, Check, ChevronLeft, Eye, X } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { isOnline, queueLength, flushQueue, getQueue, clearQueueItem, clearAllQueue } from "./offline";
+import { flushPhotos, photoPendingCount } from "./photos";
 import Auth from "./Auth";
 import EstablishmentSetup from "./EstablishmentSetup";
 import Home from "./Home";
@@ -25,6 +26,7 @@ function buildQueueExecutors(estId) {
   return {
     "animals:insert": (payload) => supabase.from("animals").insert({ establishment_id: estId, ...payload }),
     "grazing:insert": (payload) => supabase.from("grazing_water_reports").insert({ establishment_id: estId, ...payload }),
+    "weights:insert": (payload) => supabase.from("weights").insert(payload),
     "market_prices:insert": (payload) => supabase.from("market_prices").insert({ establishment_id: estId, ...payload }),
     "transactions:insert": (payload) => supabase.from("transactions").insert({
       establishment_id: estId, owner_id: payload.owner_id || null, type: payload.type,
@@ -53,6 +55,7 @@ const QUEUE_LABELS = {
   "animals:insert": "New animal",
   "grazing:insert": "New grazing/water report",
   "market_prices:insert": "New market price",
+  "weights:insert": "New weight",
   "transactions:insert": "New finance entry",
   "slaughter:insert": "New slaughter record",
 };
@@ -102,7 +105,8 @@ export default function App() {
     const goOnline = () => {
       setOnline(true);
       supabase.auth.getSession().then(({ data }) => { if (data?.session) setSession(data.session); });
-      if (establishment?.id) flushQueue(buildQueueExecutors(establishment.id)).then(() => setPending(queueLength()));
+      flushPhotos();
+      if (establishment?.id) flushQueue(buildQueueExecutors(establishment.id)).then(() => setPending(queueLength() + photoPendingCount()));
     };
     const goOffline = () => setOnline(false);
     window.addEventListener("online", goOnline);
@@ -111,7 +115,8 @@ export default function App() {
       if (establishment?.id && isOnline() && queueLength() > 0) {
         await flushQueue(buildQueueExecutors(establishment.id));
       }
-      setPending(queueLength());
+      if (isOnline()) flushPhotos();
+      setPending(queueLength() + photoPendingCount());
     }, 3000);
     return () => {
       sub.subscription.unsubscribe();
