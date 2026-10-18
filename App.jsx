@@ -3,6 +3,7 @@ import { Home as HomeIcon, PawPrint, Wallet, FileCheck, Menu, WifiOff, LogOut, C
 import { supabase } from "./supabaseClient";
 import { isOnline, queueLength, flushQueue, getQueue, clearQueueItem, clearAllQueue } from "./offline";
 import { flushPhotos, photoPendingCount } from "./photos";
+import { runSlaughterInsert } from "./slaughterOps";
 import Auth from "./Auth";
 import EstablishmentSetup from "./EstablishmentSetup";
 import Home from "./Home";
@@ -32,22 +33,7 @@ function buildQueueExecutors(estId) {
       establishment_id: estId, owner_id: payload.owner_id || null, type: payload.type,
       category: payload.category, amount: parseFloat(payload.amount), date: payload.date, description: payload.description || null,
     }),
-    "slaughter:insert": (payload) => {
-      const totalValue = payload.purpose === "sold" && payload.weight_kg && payload.price_per_kg
-        ? Number(payload.weight_kg) * Number(payload.price_per_kg) : null;
-      return supabase.from("slaughter_records").insert({
-        establishment_id: estId,
-        animal_id: payload.animal_id,
-        date: payload.date,
-        weight_kg: payload.weight_kg || null,
-        purpose: payload.purpose,
-        price_per_kg: payload.purpose === "sold" ? payload.price_per_kg || null : null,
-        total_value: totalValue,
-        buyer_name: payload.purpose === "sold" ? payload.buyer_name || null : null,
-        buyer_contact: payload.purpose === "sold" ? payload.buyer_contact || null : null,
-        linked_transaction_id: null,
-      });
-    },
+    "slaughter:insert": (payload) => runSlaughterInsert(estId, payload),
   };
 }
 
@@ -73,11 +59,14 @@ export default function App() {
   const isAdmin = role === "owner_admin";
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
+    const lastUser = () => { try { const u = JSON.parse(localStorage.getItem("kd_last_user")); return u && u.id ? u : null; } catch { return null; } };
+    if (!navigator.onLine && lastUser()) setSession({ user: lastUser(), offlineOnly: true });
+    const slowSession = new Promise((resolve) => setTimeout(() => resolve({ data: { session: null }, slow: true }), 4000));
+    Promise.race([supabase.auth.getSession(), slowSession]).then(({ data, slow }) => {
       let sess = data?.session || null;
       if (sess?.user) {
         try { localStorage.setItem("kd_last_user", JSON.stringify({ id: sess.user.id, email: sess.user.email })); } catch {}
-      } else if (!navigator.onLine) {
+      } else if (!navigator.onLine || slow) {
         // Offline and the saved login could not be refreshed: reuse the last known user so the app still opens.
         try {
           const u = JSON.parse(localStorage.getItem("kd_last_user"));
@@ -134,13 +123,25 @@ export default function App() {
   async function loadEstablishment() {
     const cacheKey = `kd_membership_${session.user.id}`;
     let result;
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(cacheKey)); } catch {}
+    if (saved?.establishment && !navigator.onLine) {
+      // no signal: open straight from the saved copy
+      setLoadError(false);
+      setEstablishment(saved.establishment);
+      setRole(saved.role);
+      return;
+    }
     try {
-      result = await supabase
+      const q = supabase
         .from("establishment_members")
         .select("establishment_id, role, establishments(*)")
         .eq("user_id", session.user.id)
         .limit(1)
         .maybeSingle();
+      result = saved?.establishment
+        ? await Promise.race([q, new Promise((resolve) => setTimeout(() => resolve({ error: new Error("slow") }), 6000))])
+        : await q;
     } catch (e) {
       result = { error: e };
     }

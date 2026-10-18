@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Plus, X, Scale, Trash2, Printer, AlertTriangle, Pencil } from "lucide-react";
 import { supabase } from "./supabaseClient";
-import { dbRead, dbWrite } from "./offline";
+import { dbRead, dbWrite, cacheGet, cacheSet } from "./offline";
+import { runSlaughterInsert, newId } from "./slaughterOps";
 
 export default function Slaughter({ establishmentId, isAdmin }) {
   const [records, setRecords] = useState([]);
@@ -30,45 +31,36 @@ export default function Slaughter({ establishmentId, isAdmin }) {
     setLoading(false);
   }
 
+  // Used when there is no signal: show the result on this phone straight away
+  function applyOfflineSlaughter(p) {
+    const animKey = `animals:${establishmentId}`;
+    const actKey = `animals_active:${establishmentId}`;
+    const all = cacheGet(animKey);
+    const act = cacheGet(actKey);
+    if (all) cacheSet(animKey, all.map((a) => (a.id === p.animal_id ? { ...a, status: "slaughtered" } : a)));
+    if (act) cacheSet(actKey, act.filter((a) => a.id !== p.animal_id));
+    const animal = (all || []).find((a) => a.id === p.animal_id) || (act || []).find((a) => a.id === p.animal_id);
+    const totalValue = p.purpose === "sold" && p.weight_kg && p.price_per_kg ? Number(p.weight_kg) * Number(p.price_per_kg) : null;
+    const rec = {
+      id: p._rec_id, establishment_id: establishmentId, animal_id: p.animal_id, date: p.date,
+      weight_kg: p.weight_kg || null, purpose: p.purpose,
+      price_per_kg: p.purpose === "sold" ? p.price_per_kg || null : null, total_value: totalValue,
+      buyer_name: p.buyer_name || null, buyer_contact: p.purpose === "sold" ? p.buyer_contact || null : null,
+      linked_transaction_id: null,
+      animals: animal ? { eartag_number: animal.eartag_number, species: animal.species, owner_id: animal.owner_id, owners: animal.owners } : null,
+    };
+    const slKey = `slaughter:${establishmentId}`;
+    cacheSet(slKey, [rec, ...(cacheGet(slKey) || [])]);
+  }
+
   async function addSlaughter(form) {
-    const totalValue = form.purpose === "sold" && form.weight_kg && form.price_per_kg
-      ? Number(form.weight_kg) * Number(form.price_per_kg) : null;
-
-    // 1. mark the animal as slaughtered
-    await supabase.from("animals").update({ status: "slaughtered" }).eq("id", form.animal_id);
-
-    // 2. if sold, create the matching Finance income entry first, so we can link it
-    let linkedTxnId = null;
-    if (form.purpose === "sold" && totalValue) {
-      const { data: txn } = await supabase.from("transactions").insert({
-        establishment_id: establishmentId,
-        owner_id: form.owner_id,
-        animal_id: form.animal_id,
-        type: "income",
-        category: "Livestock sale",
-        amount: totalValue,
-        date: form.date,
-        description: `Slaughter sale — ${form.buyer_name || "buyer not recorded"}`,
-      }).select().single();
-      linkedTxnId = txn?.id || null;
-    }
-
-    // 3. save the slaughter record itself
-    await dbWrite(
-      () => supabase.from("slaughter_records").insert({
-        establishment_id: establishmentId,
-        animal_id: form.animal_id,
-        date: form.date,
-        weight_kg: form.weight_kg || null,
-        purpose: form.purpose,
-        price_per_kg: form.purpose === "sold" ? form.price_per_kg || null : null,
-        total_value: totalValue,
-        buyer_name: form.buyer_name || null,
-        buyer_contact: form.purpose === "sold" ? form.buyer_contact || null : null,
-        linked_transaction_id: linkedTxnId,
-      }),
-      { key: "slaughter:insert", payload: form }
+    // one complete action (animal status + income entry + record); safe to replay if the signal drops
+    const payload = { ...form, _rec_id: newId(), _txn_id: newId() };
+    const res = await dbWrite(
+      () => runSlaughterInsert(establishmentId, payload),
+      { key: "slaughter:insert", payload }
     );
+    if (res.queued) applyOfflineSlaughter(payload);
     setShowAdd(false);
     load();
   }

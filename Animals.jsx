@@ -3,7 +3,7 @@ import { Plus, X, Search, ScanLine, Upload, Download, ChevronLeft, GitBranch, Sc
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import Papa from "papaparse";
 import { supabase } from "./supabaseClient";
-import { dbRead, dbWrite } from "./offline";
+import { dbRead, dbWrite, cacheGet } from "./offline";
 import { useAnimalPhoto, compressImage, savePending, flushPhotos, removePhoto, deleteAnimalPhoto } from "./photos";
 
 const SPECIES = ["cattle","sheep","goats","pigs","donkeys","horses","ostriches","poultry","other"];
@@ -23,8 +23,19 @@ export default function Animals({ establishmentId, isAdmin }) {
   useEffect(() => { load(); }, [establishmentId]);
 
   async function load() {
-    setLoading(true);
-    const [{ data: a }, { data: o }] = await Promise.all([
+    // show the saved copy straight away, then refresh from the server
+    const cA = cacheGet(`animals:${establishmentId}`);
+    if (cA) {
+      setAnimals(cA);
+      const cO = cacheGet(`owners_lite:${establishmentId}`);
+      if (cO) setOwners(cO);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+    let a = null, o = null;
+    try {
+    const res = await Promise.all([
       dbRead(`animals:${establishmentId}`, () =>
         supabase.from("animals").select("*, owners(full_name)").eq("establishment_id", establishmentId).order("created_at", { ascending: false })
       ),
@@ -32,8 +43,10 @@ export default function Animals({ establishmentId, isAdmin }) {
         supabase.from("owners").select("id, full_name, brand_marks(*)").eq("establishment_id", establishmentId)
       ),
     ]);
-    setAnimals(a || []);
-    setOwners(o || []);
+    a = res[0].data; o = res[1].data;
+    } catch {}
+    if (a) setAnimals(a);
+    if (o) setOwners(o);
     setLoading(false);
   }
 
