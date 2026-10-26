@@ -1,7 +1,8 @@
 import React from "react";
-import { PawPrint, Tag, FileCheck, HeartPulse, Wrench, Scale, Wallet, Droplets, ClipboardList } from "lucide-react";
+import { PawPrint, Tag, FileCheck, HeartPulse, Wrench, Scale, Wallet, Droplets, ClipboardList, TrendingUp } from "lucide-react";
 
 const WIDGETS = [
+  { key: "kpis", label: "Farm KPIs", icon: TrendingUp, color: "var(--green)", soft: "var(--green-soft)" },
   { key: "animals", label: "Animals", icon: PawPrint, color: "var(--green)", soft: "var(--green-soft)" },
   { key: "owners", label: "Owners & Brands", icon: Tag, color: "var(--gold)", soft: "var(--gold-soft)" },
   { key: "declarations", label: "Declaration", icon: FileCheck, color: "var(--blue)", soft: "var(--blue-soft)" },

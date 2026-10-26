@@ -16,11 +16,12 @@ import GrazingWater from "./GrazingWater";
 import LossesHealth from "./LossesHealth";
 import Registers from "./Registers";
 import FarmUpdate from "./FarmUpdate";
+import Kpis from "./Kpis";
 
 const SCREEN_TITLES = {
   home: null, animals: "Animals", owners: "Owners & Brands", declarations: "Declaration",
   slaughter: "Slaughter", finances: "Finances", health: "Losses & Health", feed: "Feed / Vaccines / Meds",
-  grazing: "Grazing & Water", registers: "Registers", more: "More", settings: "Establishment",
+  grazing: "Grazing & Water", registers: "Registers", more: "More", settings: "Establishment", kpis: "Farm KPIs",
 };
 
 function buildQueueExecutors(estId) {
@@ -242,6 +243,7 @@ export default function App() {
       {screen === "registers" && <Registers establishmentId={establishment.id} isAdmin={isAdmin} />}
       {screen === "health" && <LossesHealth establishmentId={establishment.id} isAdmin={isAdmin} />}
       {screen === "feed" && <LossesHealth establishmentId={establishment.id} isAdmin={isAdmin} initialTab="feed" />}
+      {screen === "kpis" && <Kpis establishmentId={establishment.id} />}
       {screen === "more" && <MoreScreen establishment={establishment} onNavigate={setScreen} isAdmin={isAdmin} />}
       {screen === "farmupdate" && <FarmUpdate establishmentId={establishment.id} establishmentName={establishment.name} onBack={() => setScreen("more")} />}
       {screen === "settings" && <SettingsScreen establishment={establishment} isAdmin={isAdmin} onEstablishmentChange={loadEstablishment} />}
@@ -266,6 +268,9 @@ function MoreScreen({ establishment, onNavigate, isAdmin }) {
             <span>Farm Update (for sharing)</span>
           </button>
         )}
+        <button className="card row-between" style={{ padding: 16, cursor: "pointer", textAlign: "left" }} onClick={() => onNavigate("kpis")}>
+          <span>Farm KPIs</span>
+        </button>
         <button className="card row-between" style={{ padding: 16, cursor: "pointer", textAlign: "left" }} onClick={() => onNavigate("owners")}>
           <span>Owners & Brands</span>
         </button>

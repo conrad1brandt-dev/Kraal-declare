@@ -9,7 +9,7 @@ const CATEGORY_ORDER = {
   cattle: ["Bul (breeding bull)", "Groot Koeie (mature cow)", "Jong Vers (young heifer)", "Tollie (young bull/steer)", "Kalf (female)", "Kalf (male)"],
 };
 
-function categorize(species, breedCategory, sexRaw) {
+export function categorize(species, breedCategory, sexRaw) {
   const bc = (breedCategory || "").toLowerCase();
   const isMale = (sexRaw || "").toString().trim().toUpperCase().startsWith("M");
   if (species === "sheep" || species === "goats") {
