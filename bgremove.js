@@ -7,7 +7,7 @@ const ORT_BASE = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/di
 const MODEL_URL = "/models/u2netp.onnx";
 const SIZE = 320;
 const MAX_DIM = 1000;
-export const CLEAN_BG = "#F4EFE3"; // same cream as the app background
+export const CLEAN_BG = "#B7C4A0"; // soft sage green, in the family of the app's olive green
 
 let sessionPromise = null;
 
