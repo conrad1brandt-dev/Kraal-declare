@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { Plus, X, Search, ScanLine, Upload, Download, ChevronLeft, GitBranch, Scale, Syringe, Heart, Pencil, Trash2, Camera } from "lucide-react";
+import { Plus, X, Search, ScanLine, Upload, Download, ChevronLeft, GitBranch, Scale, Syringe, Heart, Pencil, Trash2, Camera, Baby } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import Papa from "papaparse";
 import { supabase } from "./supabaseClient";
@@ -107,7 +107,7 @@ export default function Animals({ establishmentId, isAdmin }) {
 
   if (loading) return <div className="container">Loading animals…</div>;
 
-  if (selected) return <AnimalDetail animal={selected} allAnimals={animals} owners={owners} isAdmin={isAdmin} establishmentId={establishmentId} onBack={() => { setSelected(null); load(); }} />;
+  if (selected) return <AnimalDetail animal={selected} allAnimals={animals} owners={owners} isAdmin={isAdmin} establishmentId={establishmentId} onBack={() => { setSelected(null); load(); }} onRefresh={load} />;
 
   return (
     <div className="container">
@@ -220,6 +220,50 @@ function ageText(dob) {
 
 const daysBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
 
+// Births: females in these categories can have lambs, kids or calves registered.
+const BIRTH_CATS = ["groot ooie", "jong ooie", "groot koeie", "jong vers"];
+export function canGiveBirth(an) {
+  const female = String(an.sex || "").toUpperCase().startsWith("F");
+  const c = (an.breed_category || "").toLowerCase().trim();
+  return female && an.status === "active" && BIRTH_CATS.some((b) => c === b || c.startsWith(b.replace(/e$/, "")));
+}
+const GESTATION_DAYS = { sheep: 150, goats: 150, cattle: 283 };
+const addDays = (iso, n) => { const d = new Date(iso); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+
+// Provisional tags follow the mother: 1234-L1, 1234-L2 (lambs/kids), 1234-K1 (calves).
+// They are placeholders until the physical tags are in, and can be edited on each animal.
+export function birthTags(mother, allAnimals, count) {
+  const letter = mother.species === "cattle" ? "K" : "L";
+  const prefix = `${mother.eartag_number}-${letter}`;
+  const used = new Set(allAnimals.filter((a) => a.owner_id === mother.owner_id).map((a) => a.eartag_number));
+  const out = [];
+  for (let n = 1; out.length < count; n++) if (!used.has(prefix + n)) out.push(prefix + n);
+  return out;
+}
+
+// Saves a birth: the newborns, plus the birth on the mother's breeding record.
+// Safe to run again (offline replay): existing tags are skipped, the birth is logged once.
+export async function runBirthInsert(estId, p) {
+  const rows = p.young.map((y) => ({
+    establishment_id: estId, owner_id: p.owner_id, brand_mark_id: p.brand_mark_id || null,
+    eartag_number: y.eartag_number, species: p.species, breed_category: p.category,
+    sex: y.sex, dob: p.dob, status: "active", dam_id: p.dam_id, sire_id: p.sire_id || null,
+  }));
+  const ins = await supabase.from("animals").upsert(rows, { onConflict: "owner_id,eartag_number", ignoreDuplicates: true });
+  if (ins.error) return ins;
+  const notes = `${p.young.length} born: ${p.young.map((y) => `${y.eartag_number} (${y.sex === "F" ? "F" : "M"})`).join(", ")}`;
+  if (p.event_id) {
+    return supabase.from("breeding_events").update({ actual_birth: p.dob, offspring_count: p.young.length, sire_id: p.sire_id || null, notes }).eq("id", p.event_id);
+  }
+  const dup = await supabase.from("breeding_events").select("id").eq("dam_id", p.dam_id).eq("actual_birth", p.dob).limit(1);
+  if (dup.error) return dup;
+  if (dup.data && dup.data.length) return { error: null };
+  return supabase.from("breeding_events").insert({
+    dam_id: p.dam_id, sire_id: p.sire_id || null, mated_date: addDays(p.dob, -(GESTATION_DAYS[p.species] || 150)),
+    actual_birth: p.dob, offspring_count: p.young.length, notes: `${notes} · mating date estimated`,
+  });
+}
+
 function PhotoThumb({ animal }) {
   const ref = useRef(null);
   const [vis, setVis] = useState(false);
@@ -240,7 +284,7 @@ function PhotoThumb({ animal }) {
   );
 }
 
-function AnimalDetail({ animal, allAnimals, owners, isAdmin, establishmentId, onBack }) {
+function AnimalDetail({ animal, allAnimals, owners, isAdmin, establishmentId, onBack, onRefresh }) {
   const [an, setAn] = useState(animal);
   const dam = allAnimals.find((a) => a.id === an.dam_id);
   const sire = allAnimals.find((a) => a.id === an.sire_id);
@@ -253,6 +297,7 @@ function AnimalDetail({ animal, allAnimals, owners, isAdmin, establishmentId, on
   const [showAddWeight, setShowAddWeight] = useState(false);
   const [showAddHealth, setShowAddHealth] = useState(false);
   const [showAddBreeding, setShowAddBreeding] = useState(false);
+  const [showBirth, setShowBirth] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showPhotoMenu, setShowPhotoMenu] = useState(false);
@@ -329,6 +374,13 @@ function AnimalDetail({ animal, allAnimals, owners, isAdmin, establishmentId, on
     await supabase.from("breeding_events").insert({ dam_id: animal.id, ...form });
     setShowAddBreeding(false);
     loadEvents();
+  }
+  async function registerBirth(payload) {
+    const res = await dbWrite(() => runBirthInsert(establishmentId, payload), { key: "birth:insert", payload });
+    setShowBirth(false);
+    if (res.queued) alert("No signal – the birth is saved on this phone and will upload as soon as you have signal.");
+    loadEvents();
+    if (onRefresh) onRefresh();
   }
 
   async function onPickPhoto(e) {
@@ -425,6 +477,7 @@ function AnimalDetail({ animal, allAnimals, owners, isAdmin, establishmentId, on
 
       <div className="font-tag" style={{ fontSize: 24, fontWeight: 700 }}>{an.eartag_number}</div>
       <p style={{ fontSize: 13, color: "var(--ink-soft)", marginBottom: 10 }}>Owner: {an.owners?.full_name || "shared/communal"}</p>
+      {showBirth && <BirthModal mother={an} allAnimals={allAnimals} breeding={breeding} onClose={() => setShowBirth(false)} onSave={registerBirth} />}
       {showEdit && <EditAnimalModal animal={an} owners={owners} allAnimals={allAnimals} onClose={() => setShowEdit(false)} onSave={updateAnimal} />}
 
       <div style={{ display: "flex", gap: 12, marginBottom: 4 }}>
@@ -462,6 +515,11 @@ function AnimalDetail({ animal, allAnimals, owners, isAdmin, establishmentId, on
 
       {tab === "record" && (
         <div className="stack">
+          {isAdmin && canGiveBirth(an) && (
+            <button className="btn btn-primary" style={{ width: "100%", fontWeight: 600 }} onClick={() => setShowBirth(true)}>
+              <Baby size={16} /> Register birth ({an.species === "cattle" ? "calf" : an.species === "goats" ? "kid" : "lamb"})
+            </button>
+          )}
           {isAdmin && catOptions && (
             <button className="btn btn-secondary" style={{ width: "100%", fontWeight: 600 }} onClick={() => setShowMove(true)}>
               {suggestion ? `⇧ Move to ${suggestion}` : "Change category"}
@@ -489,7 +547,7 @@ function AnimalDetail({ animal, allAnimals, owners, isAdmin, establishmentId, on
           {offspring.length > 0 && (
             <div className="card" style={{ padding: 16 }}>
               <div className="field-label" style={{ marginBottom: 8 }}>Offspring ({offspring.length})</div>
-              {offspring.map((o) => <div key={o.id} style={{ fontSize: 14, padding: "4px 0" }} className="font-tag">{o.eartag_number} — {o.status}</div>)}
+              {offspring.map((o) => <div key={o.id} style={{ fontSize: 14, padding: "4px 0" }}><span className="font-tag">{o.eartag_number}</span> — {String(o.sex).toUpperCase().startsWith("F") ? "F" : "M"}{o.dob ? `, born ${o.dob}` : ""}{o.status !== "active" ? ` — ${o.status}` : ""}</div>)}
             </div>
           )}
         </div>
@@ -998,6 +1056,80 @@ function ImportModal({ establishmentId, owners, onClose, onDone }) {
         <button className="btn btn-primary" disabled={rows.length === 0 || importing} onClick={runImport}>
           {importing ? "Importing…" : `Import ${rows.length || ""} animals`}
         </button>
+      </div>
+    </div>
+  );
+}
+
+function BirthModal({ mother, allAnimals, breeding, onClose, onSave }) {
+  const young = mother.species === "cattle" ? "calf" : mother.species === "goats" ? "kid" : "lamb";
+  const open = breeding.find((b) => !b.actual_birth);
+  const sires = allAnimals.filter((a) => a.species === mother.species && String(a.sex).toUpperCase().startsWith("M") && a.status === "active");
+  const [dob, setDob] = useState(todayISO());
+  const [count, setCount] = useState(1);
+  const [sexes, setSexes] = useState(["F", "F", "F"]);
+  const [sireId, setSireId] = useState((open && open.sire_id) || "");
+  const [busy, setBusy] = useState(false);
+  const tags = birthTags(mother, allAnimals, count);
+  const category = mother.species === "cattle" ? "Kalf" : "Lam";
+
+  async function save() {
+    if (dob > todayISO()) { alert("The birth date can't be in the future."); return; }
+    setBusy(true);
+    await onSave({
+      dam_id: mother.id, owner_id: mother.owner_id, brand_mark_id: mother.brand_mark_id || null,
+      species: mother.species, category, dob, sire_id: sireId || null, event_id: open ? open.id : null,
+      young: tags.map((t, i) => ({ eartag_number: t, sex: sexes[i] })),
+    });
+    setBusy(false);
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="row-between" style={{ marginBottom: 4 }}>
+          <h3 className="font-display" style={{ fontSize: 18, fontWeight: 700 }}>Register birth</h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--ink-soft)", cursor: "pointer" }}><X size={20} /></button>
+        </div>
+        <p style={{ fontSize: 13, color: "var(--ink-soft)", marginBottom: 12 }}>Mother <span className="font-tag">{mother.eartag_number}</span> · {mother.owners?.full_name || "shared"}</p>
+        <div className="stack">
+          <div className="field"><span className="field-label">Date of birth</span>
+            <input type="date" className="input" value={dob} max={todayISO()} onChange={(e) => setDob(e.target.value)} />
+          </div>
+          <div className="field"><span className="field-label">How many born?</span>
+            <div style={{ display: "flex", gap: 8 }}>
+              {[1, 2, 3].map((n) => (
+                <button key={n} className={`btn ${count === n ? "btn-primary" : "btn-secondary"}`} style={{ flex: 1 }} onClick={() => setCount(n)}>
+                  {n === 1 ? "1" : n === 2 ? "2 (twins)" : "3"}
+                </button>
+              ))}
+            </div>
+          </div>
+          {tags.map((t, i) => (
+            <div key={t} className="row-between" style={{ gap: 8 }}>
+              <span className="font-tag" style={{ fontWeight: 600, fontSize: 14 }}>{t}</span>
+              <div style={{ display: "flex", gap: 6 }}>
+                {[["F", "Ooi/Vers"], ["M", "Ram/Bul"]].map(([v]) => (
+                  <button key={v} className={`btn ${sexes[i] === v ? "btn-primary" : "btn-secondary"}`} style={{ padding: "6px 14px" }}
+                    onClick={() => setSexes((s) => s.map((x, j) => (j === i ? v : x)))}>
+                    {v === "F" ? "Female" : "Male"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+          <div className="field"><span className="field-label">Sire (optional)</span>
+            <select className="input" value={sireId} onChange={(e) => setSireId(e.target.value)}>
+              <option value="">Unknown</option>
+              {sires.map((s) => <option key={s.id} value={s.id}>{s.eartag_number}{s.breed_category ? ` – ${s.breed_category}` : ""}</option>)}
+            </select>
+          </div>
+          <p style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+            Each {young} is added as <b>{category}</b> under the same owner, linked to its mother{open ? ", and her open mating record is marked as born" : ""}.
+            The tags are temporary – change them on each animal once the physical tags are in.
+          </p>
+          <button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? "Saving…" : `Save ${count} ${count > 1 ? (young === "calf" ? "calves" : young + "s") : young}`}</button>
+        </div>
       </div>
     </div>
   );

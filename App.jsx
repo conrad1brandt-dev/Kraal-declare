@@ -8,7 +8,7 @@ import Auth from "./Auth";
 import EstablishmentSetup from "./EstablishmentSetup";
 import Home from "./Home";
 import Owners from "./Owners";
-import Animals from "./Animals";
+import Animals, { runBirthInsert } from "./Animals";
 import Declarations from "./Declarations";
 import Slaughter from "./Slaughter";
 import Finances from "./Finances";
@@ -36,6 +36,7 @@ function buildQueueExecutors(estId) {
       category: payload.category, amount: parseFloat(payload.amount), date: payload.date, description: payload.description || null,
     }),
     "slaughter:insert": (payload) => runSlaughterInsert(estId, payload),
+    "birth:insert": (payload) => runBirthInsert(estId, payload),
   };
 }
 
@@ -46,6 +47,7 @@ const QUEUE_LABELS = {
   "weights:insert": "New weight",
   "transactions:insert": "New finance entry",
   "slaughter:insert": "New slaughter record",
+  "birth:insert": "New birth",
 };
 
 export default function App() {
