@@ -180,8 +180,8 @@ export default function Animals({ establishmentId, isAdmin }) {
   );
 }
 
-const SHEEP_CATS = ["Lam", "Jong Ooie", "Groot Ooie", "Hamel/Kapater"];
-const CATTLE_CATS = ["Kalf", "Jong Vers", "Groot Koeie", "Tollie"];
+const SHEEP_CATS = ["Lam", "Jong Ooie", "Groot Ooie", "Hamel/Kapater", "Ram"];
+const CATTLE_CATS = ["Kalf", "Jong Vers", "Groot Koeie", "Tollie", "Bul"];
 
 function categoryOptions(species) {
   if (species === "sheep" || species === "goats") return SHEEP_CATS;

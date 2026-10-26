@@ -4,15 +4,16 @@ import { supabase } from "./supabaseClient";
 import { dbRead, dbWrite } from "./offline";
 
 const CATEGORY_ORDER = {
-  sheep: ["Groot Ooie (mature ewe/nanny)", "Hamel/Kapater (castrated male)", "Jong Ooie (young ewe/nanny)", "Lam (female)", "Lam (male)"],
-  goats: ["Groot Ooie (mature ewe/nanny)", "Hamel/Kapater (castrated male)", "Jong Ooie (young ewe/nanny)", "Lam (female)", "Lam (male)"],
-  cattle: ["Groot Koeie (mature cow)", "Jong Vers (young heifer)", "Tollie (young bull/steer)", "Kalf (female)", "Kalf (male)"],
+  sheep: ["Ram (breeding male)", "Groot Ooie (mature ewe/nanny)", "Hamel/Kapater (castrated male)", "Jong Ooie (young ewe/nanny)", "Lam (female)", "Lam (male)"],
+  goats: ["Ram (breeding male)", "Groot Ooie (mature ewe/nanny)", "Hamel/Kapater (castrated male)", "Jong Ooie (young ewe/nanny)", "Lam (female)", "Lam (male)"],
+  cattle: ["Bul (breeding bull)", "Groot Koeie (mature cow)", "Jong Vers (young heifer)", "Tollie (young bull/steer)", "Kalf (female)", "Kalf (male)"],
 };
 
 function categorize(species, breedCategory, sexRaw) {
   const bc = (breedCategory || "").toLowerCase();
   const isMale = (sexRaw || "").toString().trim().toUpperCase().startsWith("M");
   if (species === "sheep" || species === "goats") {
+    if (/\bram\b/.test(bc) || bc.trim() === "bok" || bc.includes("teelbok")) return "Ram (breeding male)";
     if (bc.includes("lam")) return isMale ? "Lam (male)" : "Lam (female)";
     if (bc.includes("hamel") || bc.includes("kapater")) return "Hamel/Kapater (castrated male)";
     if (bc.includes("jong")) return "Jong Ooie (young ewe/nanny)";
@@ -22,6 +23,7 @@ function categorize(species, breedCategory, sexRaw) {
   if (species === "cattle") {
     if (bc.includes("kalf")) return isMale ? "Kalf (male)" : "Kalf (female)";
     if (bc.includes("tollie")) return "Tollie (young bull/steer)";
+    if (/\bbul\b|\bbull\b/.test(bc)) return "Bul (breeding bull)";
     if (bc.includes("vers")) return "Jong Vers (young heifer)";
     if (bc.includes("groot") || bc.includes("koei")) return "Groot Koeie (mature cow)";
     return "Other / uncategorized";
