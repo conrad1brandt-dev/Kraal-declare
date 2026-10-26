@@ -225,7 +225,7 @@ const BIRTH_CATS = ["groot ooie", "jong ooie", "groot koeie", "jong vers"];
 export function canGiveBirth(an) {
   const female = String(an.sex || "").toUpperCase().startsWith("F");
   const c = (an.breed_category || "").toLowerCase().trim();
-  return female && an.status === "active" && BIRTH_CATS.some((b) => c === b || c.startsWith(b.replace(/e$/, "")));
+  return female && an.status === "active" && BIRTH_CATS.some((b) => c.includes(b));
 }
 const GESTATION_DAYS = { sheep: 150, goats: 150, cattle: 283 };
 const addDays = (iso, n) => { const d = new Date(iso); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
@@ -246,7 +246,7 @@ export function birthTags(mother, allAnimals, count) {
 export async function runBirthInsert(estId, p) {
   const rows = p.young.map((y) => ({
     establishment_id: estId, owner_id: p.owner_id, brand_mark_id: p.brand_mark_id || null,
-    eartag_number: y.eartag_number, species: p.species, breed_category: p.category,
+    eartag_number: y.eartag_number, species: p.species, breed_category: `${p.category} (${y.sex === "F" ? "female" : "male"})`,
     sex: y.sex, dob: p.dob, status: "active", dam_id: p.dam_id, sire_id: p.sire_id || null,
   }));
   const ins = await supabase.from("animals").upsert(rows, { onConflict: "owner_id,eartag_number", ignoreDuplicates: true });
@@ -1125,7 +1125,7 @@ function BirthModal({ mother, allAnimals, breeding, onClose, onSave }) {
             </select>
           </div>
           <p style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-            Each {young} is added as <b>{category}</b> under the same owner, linked to its mother{open ? ", and her open mating record is marked as born" : ""}.
+            Each {young} is added as <b>{category} (female/male)</b> under the same owner, linked to its mother{open ? ", and her open mating record is marked as born" : ""}.
             The tags are temporary – change them on each animal once the physical tags are in.
           </p>
           <button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? "Saving…" : `Save ${count} ${count > 1 ? (young === "calf" ? "calves" : young + "s") : young}`}</button>
