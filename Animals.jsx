@@ -5,6 +5,7 @@ import Papa from "papaparse";
 import { supabase } from "./supabaseClient";
 import { dbRead, dbWrite, cacheGet } from "./offline";
 import { useAnimalPhoto, compressImage, savePending, flushPhotos, removePhoto, deleteAnimalPhoto } from "./photos";
+import { cleanBackground } from "./bgremove";
 
 const SPECIES = ["cattle","sheep","goats","pigs","donkeys","horses","ostriches","poultry","other"];
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -258,6 +259,8 @@ function AnimalDetail({ animal, allAnimals, owners, isAdmin, establishmentId, on
   const [showMove, setShowMove] = useState(false);
   const [viewPhoto, setViewPhoto] = useState(false);
   const [busyPhoto, setBusyPhoto] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
+  const [cleanPreview, setCleanPreview] = useState(null); // { blob, url }
   const camRef = useRef(null);
   const galRef = useRef(null);
   const { url: photoUrl, pending: photoPending } = useAnimalPhoto(an);
@@ -342,6 +345,36 @@ function AnimalDetail({ animal, allAnimals, owners, isAdmin, establishmentId, on
       alert("Could not use that photo: " + (err.message || err));
     }
     setBusyPhoto(false);
+  }
+
+  async function onCleanBackground() {
+    if (!photoUrl) return;
+    if (!navigator.onLine) { alert("Cleaning the background needs signal the first time. Try again when you have signal."); return; }
+    setCleaning(true);
+    try {
+      const src = await (await fetch(photoUrl)).blob();
+      const out = await cleanBackground(src);
+      setCleanPreview({ blob: out, url: URL.createObjectURL(out) });
+      setShowPhotoMenu(false);
+    } catch (err) {
+      alert("Could not clean the background: " + (err.message || err));
+    }
+    setCleaning(false);
+  }
+
+  function closeCleanPreview() {
+    if (cleanPreview) URL.revokeObjectURL(cleanPreview.url);
+    setCleanPreview(null);
+  }
+
+  async function useCleanPhoto() {
+    try {
+      await savePending(animal.id, establishmentId, cleanPreview.blob);
+      flushPhotos();
+      closeCleanPreview();
+    } catch (err) {
+      alert("Could not save the photo: " + (err.message || err));
+    }
   }
 
   async function onRemovePhoto() {
@@ -534,6 +567,7 @@ function AnimalDetail({ animal, allAnimals, owners, isAdmin, establishmentId, on
             <div className="stack">
               <button className="btn btn-primary" disabled={busyPhoto} onClick={() => camRef.current && camRef.current.click()}>{busyPhoto ? "Working…" : "📷 Take a photo"}</button>
               <button className="btn btn-secondary" disabled={busyPhoto} onClick={() => galRef.current && galRef.current.click()}>🖼 Choose from gallery</button>
+              {photoUrl && <button className="btn btn-secondary" disabled={cleaning || busyPhoto} onClick={onCleanBackground}>{cleaning ? "Cleaning… (first time can take a minute)" : "✨ Clean background"}</button>}
               {(photoUrl || photoPending) && <button className="btn btn-secondary" style={{ color: "var(--red)" }} onClick={onRemovePhoto}>🗑 Remove photo</button>}
               <p style={{ fontSize: 12, color: "var(--ink-soft)" }}>Works without signal. The photo is saved on this phone and uploads by itself when signal returns. Tip: side-on, with the ear tag visible.</p>
             </div>
@@ -557,6 +591,32 @@ function AnimalDetail({ animal, allAnimals, owners, isAdmin, establishmentId, on
                   {c}{c === suggestion ? "  (suggested)" : ""}
                 </button>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {cleanPreview && (
+        <div className="modal-overlay" onClick={closeCleanPreview}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="row-between" style={{ marginBottom: 12 }}>
+              <h3 className="font-display" style={{ fontSize: 18, fontWeight: 700 }}>Clean background</h3>
+              <button onClick={closeCleanPreview} style={{ background: "none", border: "none", color: "var(--ink-soft)", cursor: "pointer" }}><X size={20} /></button>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <div style={{ flex: 1, textAlign: "center" }}>
+                <img src={photoUrl} alt="" style={{ width: "100%", borderRadius: 8 }} />
+                <div style={{ fontSize: 11, color: "var(--ink-soft)" }}>Before</div>
+              </div>
+              <div style={{ flex: 1, textAlign: "center" }}>
+                <img src={cleanPreview.url} alt="" style={{ width: "100%", borderRadius: 8 }} />
+                <div style={{ fontSize: 11, color: "var(--ink-soft)" }}>After</div>
+              </div>
+            </div>
+            <div className="stack">
+              <button className="btn btn-primary" onClick={useCleanPhoto}>Use this photo</button>
+              <button className="btn btn-secondary" onClick={closeCleanPreview}>Keep the original</button>
+              <p style={{ fontSize: 12, color: "var(--ink-soft)" }}>Works best when the whole animal is in the photo, side-on, and not too far away.</p>
             </div>
           </div>
         </div>
