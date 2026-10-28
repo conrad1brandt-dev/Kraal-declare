@@ -2,7 +2,8 @@ import React, { useState, useEffect } from "react";
 import { Plus, X, FileCheck, Trash2 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { dbRead } from "./offline";
-import DeclarationDetail from "./DeclarationDetail";
+import DeclarationForm from "./DeclarationForm";
+import { carryOver } from "./declarationSpec";
 
 function currentPeriod() {
   const m = new Date().getMonth() + 1;
@@ -26,10 +27,18 @@ export default function Declarations({ establishmentId, isAdmin }) {
     setLoading(false);
   }
 
+  // A new declaration starts with the previous one's answers (Yes/No questions, farm details),
+  // while the numbers for the new half-year come fresh from the records.
   async function addDeclaration(form) {
-    const { data, error } = await supabase.from("declarations").insert({ establishment_id: establishmentId, ...form }).select().single();
+    if (declarations.some((d) => d.period === form.period && d.year === form.year)) { alert("There is already a declaration for that period."); return; }
+    const ord = (d) => d.year * 2 + (d.period === "jul_dec" ? 1 : 0);
+    const prev = declarations.filter((d) => ord(d) < ord(form)).sort((a, b) => ord(b) - ord(a))[0];
+    const answers = carryOver(prev && prev.answers);
+    const { data, error } = await supabase.from("declarations").insert({ establishment_id: establishmentId, ...form, answers }).select().single();
+    if (error) { alert("Could not start the declaration (this needs signal): " + error.message); return; }
     setShowAdd(false);
-    if (!error) { await load(); setSelected(data); }
+    await load();
+    setSelected(data);
   }
 
   async function deleteDeclaration(d, e) {
@@ -41,11 +50,11 @@ export default function Declarations({ establishmentId, isAdmin }) {
 
   if (loading) return <div className="container">Loading declaration…</div>;
 
-  if (selected) return <DeclarationDetail declaration={selected} isAdmin={isAdmin} onBack={() => { setSelected(null); load(); }} />;
+  if (selected) return <DeclarationForm declaration={selected} isAdmin={isAdmin} onBack={() => { setSelected(null); load(); }} />;
 
   return (
     <div className="container">
-      <p style={{ fontSize: 14, color: "var(--ink-soft)", marginBottom: 16 }}>One declaration per 6-month period for the whole farm</p>
+      <p style={{ fontSize: 14, color: "var(--ink-soft)", marginBottom: 16 }}>The official DVS Animal Health Declaration – one per 6-month period for the whole farm. Numbers are filled in from your records.</p>
 
       {declarations.length === 0 ? (
         <div className="card" style={{ textAlign: "center", padding: 40, borderStyle: "dashed" }}>
@@ -60,9 +69,10 @@ export default function Declarations({ establishmentId, isAdmin }) {
                 <FileCheck size={18} color="var(--blue)" />
                 <div>
                   <div style={{ fontWeight: 600, fontSize: 14 }}>{d.period === "jan_jun" ? "Jan–Jun" : "Jul–Dec"} {d.year}</div>
+                  {d.signed_by && <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>Signed by {d.signed_by}{d.signed_date ? `, ${d.signed_date}` : ""}</div>}
                 </div>
               </div>
-              <span className="badge" style={{ background: d.status === "submitted" ? "var(--green-soft)" : "var(--gold-soft)", color: d.status === "submitted" ? "var(--green)" : "#7A5A16" }}>{d.status}</span>
+              <span className="badge" style={{ marginLeft: "auto", background: d.status === "submitted" ? "var(--green-soft)" : "var(--gold-soft)", color: d.status === "submitted" ? "var(--green)" : "#7A5A16" }}>{d.status === "submitted" ? "Submitted" : "Draft"}</span>
               {isAdmin && (
                 <button onClick={(e) => deleteDeclaration(d, e)} style={{ background: "none", border: "none", color: "var(--red)", cursor: "pointer", marginLeft: 8 }}>
                   <Trash2 size={15} />
