@@ -176,7 +176,7 @@ export default function DeclarationForm({ declaration, isAdmin, onBack }) {
       <div className="tabs" style={{ marginBottom: 12 }}>
         {[1, 2, 3, 4].map((p) => (
           <button key={p} className={`tab ${page === p ? "active" : ""}`} onClick={() => setPage(p)} style={{ position: "relative" }}>
-            Page {p}{open[p] > 0 && <span style={{ marginLeft: 4, fontSize: 10, background: "var(--gold-soft)", color: "#7A5A16", borderRadius: 99, padding: "1px 6px" }}>{open[p]}</span>}
+            {page === p ? `Page ${p}` : p}{open[p] > 0 && <span style={{ marginLeft: 4, fontSize: 10, background: "var(--gold-soft)", color: "#7A5A16", borderRadius: 99, padding: "1px 6px" }}>{open[p]}</span>}
           </button>
         ))}
       </div>
@@ -228,7 +228,7 @@ function Section({ s, fp, decl }) {
       </div>
       {s.sub && <div style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 8 }}>{s.sub}</div>}
       <div className="stack" style={{ gap: 10 }}>
-        {s.fields.map((f) => <Field key={f.id} f={f} fp={fp} decl={decl} />)}
+        {s.fields.map((f) => <Field key={f.id} f={f} fp={fp} decl={decl} single={s.fields.length === 1} />)}
       </div>
     </div>
   );
@@ -257,7 +257,7 @@ function Pills({ options, value, onChange, disabled }) {
 const numIn = (v) => (v === "" || v === null || v === undefined ? "" : v);
 const toNum = (s) => (s === "" ? null : Number(s));
 
-function Field({ f, fp, decl }) {
+function Field({ f, fp, decl, single }) {
   const { val, set, locked } = fp;
   const label = (id, text) => (
     <span className="field-label" style={{ display: "flex", alignItems: "center", flexWrap: "wrap" }}>{text}<Origin id={id} fp={fp} /></span>
@@ -272,9 +272,17 @@ function Field({ f, fp, decl }) {
       const v = val(f.id);
       return (
         <div>
-          <div style={{ fontSize: 13, marginBottom: 5, display: "flex", alignItems: "center", flexWrap: "wrap" }}>{f.label}<Origin id={f.id} fp={fp} /></div>
-          <Pills options={f.options || (f.type === "pmg" ? PMG : YN)} value={v} onChange={(x) => set(f.id, x)} disabled={locked} />
-          {f.countId && (
+          {single
+            ? <div style={{ marginBottom: 4 }}><Origin id={f.id} fp={fp} /></div>
+            : <div style={{ fontSize: 13, marginBottom: 5, display: "flex", alignItems: "center", flexWrap: "wrap" }}>{f.label}<Origin id={f.id} fp={fp} /></div>}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <Pills options={f.options || (f.type === "pmg" ? PMG : YN)} value={v} onChange={(x) => set(f.id, x)} disabled={locked} />
+            {f.countId && !f.countLabel && (
+              <input type="number" inputMode="numeric" className="input" placeholder="No." aria-label="Number" disabled={locked}
+                style={{ width: 70, padding: "5px 8px", fontSize: 13 }} value={numIn(val(f.countId))} onChange={(e) => set(f.countId, toNum(e.target.value))} />
+            )}
+          </div>
+          {f.countId && f.countLabel && (
             <div className="field" style={{ marginTop: 6, maxWidth: 160 }}>
               {label(f.countId, f.countLabel || "Number")}
               <input type="number" inputMode="numeric" className="input" disabled={locked} value={numIn(val(f.countId))} onChange={(e) => set(f.countId, toNum(e.target.value))} />
