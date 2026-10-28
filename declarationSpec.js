@@ -210,7 +210,8 @@ export function herdNumbers(animals, at = new Date().toISOString().slice(0, 10))
       if (cat.includes("karakul")) n.q4_karakul++; else if (cat.includes("dorper")) n.q4_dorper++; else n.q4_other_sheep++;
       if (!young) n.q4_sheep_1y++;
     } else if (a.species === "goats") {
-      if (cat.includes("boerbok") || cat.includes("boer goat")) n.q4_boerbok++; else n.q4_other_goats++;
+      // Plaas Damas runs Boerbok goats, so goats count as Boerbok unless the category names another breed
+      if (/kalahari|savann|angora|indigenous|inheems|kashmir|saanen|milk|melk|other|ander/.test(cat)) n.q4_other_goats++; else n.q4_boerbok++;
       if (!young) n.q4_goats_1y++;
     } else {
       const k = { pigs: "q4_pigs", donkeys: "q4_donkeys", horses: "q4_horses", ostriches: "q4_ostriches", poultry: "q4_poultry" }[a.species];
