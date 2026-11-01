@@ -16,6 +16,13 @@ const shiftMonth = (iso, n) => { const [y, m] = iso.split("-").map(Number); retu
 const monthLabel = (iso) => { const [y, m] = iso.split("-").map(Number); return `${MONTHS_AF[m - 1]} ${y}`; };
 const lastDay = (iso) => { const [y, m] = iso.split("-").map(Number); const d = new Date(y, m, 0); return `${y}-${String(m).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 
+// Budget categories (Afrikaans, as on the sheet) -> the categories used in Finances and the statement.
+export const FINANCE_CATEGORY = {
+  "Voer": "Feed", "Nutrition": "Feed", "Veeartseny": "Veterinary", "Lone & werkers": "Labour", "Brandstof": "Fuel/transport",
+  "Onderhoud": "Fencing/infrastructure", "Dienste & admin": "Other expense", "Ander": "Other expense",
+};
+const financeCat = (c) => FINANCE_CATEGORY[c] || "Other expense";
+
 export const lineCalc = (e) => (Number(e.qty) || 0) * (Number(e.unit_price) || 0);
 export const lineAmount = (e) => (e.receipt_amount != null && e.receipt_amount !== "" ? Number(e.receipt_amount) : lineCalc(e));
 
@@ -177,13 +184,13 @@ export default function Budget({ establishmentId, isAdmin }) {
       const date = lastDay(month);
       for (const e of expenses.filter((x) => x.include && !x.transaction_id && lineAmount(x) > 0)) {
         const t = await must(supabase.from("transactions").insert({
-          establishment_id: establishmentId, type: "expense", category: e.category || "Ander", amount: lineAmount(e), date,
+          establishment_id: establishmentId, type: "expense", category: financeCat(e.category || "Ander"), amount: lineAmount(e), date,
           description: `Begroting ${monthLabel(month)}: ${e.item_name}${e.receipt_no ? ` (${e.receipt_no})` : ""}`,
         }).select("id").single());
         await must(supabase.from("budget_expenses").update({ transaction_id: t.id }).eq("id", e.id));
       }
       if (calc.petrol > 0) {
-        await must(supabase.from("transactions").insert({ establishment_id: establishmentId, type: "expense", category: "Brandstof", amount: calc.petrol, date, description: petrolDesc() }));
+        await must(supabase.from("transactions").insert({ establishment_id: establishmentId, type: "expense", category: "Fuel/transport", amount: calc.petrol, date, description: petrolDesc() }));
       }
       await must(supabase.from("budget_months").update({ status: "final", finalized_at: new Date().toISOString() }).eq("id", row.id));
       await loadMonth();

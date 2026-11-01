@@ -6,6 +6,17 @@ import { dbRead, dbWrite } from "./offline";
 
 const INCOME_CATEGORIES = ["Livestock sale", "Milk/produce", "Grant/subsidy", "Other income"];
 const EXPENSE_CATEGORIES = ["Feed", "Veterinary", "Medication", "Labour", "Equipment", "Fuel/transport", "Fencing/infrastructure", "Other expense"];
+// Older entries from the monthly budget used its Afrikaans categories; show them on the matching line.
+const CATEGORY_ALIAS = {
+  "Voer": "Feed", "Nutrition": "Feed", "Veeartseny": "Veterinary", "Lone & werkers": "Labour", "Brandstof": "Fuel/transport",
+  "Onderhoud": "Fencing/infrastructure", "Dienste & admin": "Other expense", "Ander": "Other expense",
+};
+// Any category the statement doesn't list lands on "Other income" / "Other expense", so the lines always add up to the totals.
+const statementCat = (t) => {
+  const list = t.type === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+  const c = CATEGORY_ALIAS[t.category] || t.category;
+  return list.includes(c) ? c : t.type === "income" ? "Other income" : "Other expense";
+};
 const CAT_COLORS = ["#3D4B2E", "#B5822A", "#B5652E", "#6B6650", "#7A8B6B", "#D1AD5C", "#C4756A", "#9C8F6E"];
 const fmt = (n) => `N$ ${Number(n).toLocaleString("en-NA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -150,7 +161,7 @@ function FinanceReports({ txns }) {
 
   const byCategory = useMemo(() => {
     const map = {};
-    txns.filter((t) => t.type === "expense").forEach((t) => { map[t.category] = (map[t.category] || 0) + Number(t.amount); });
+    txns.filter((t) => t.type === "expense").forEach((t) => { const c = statementCat(t); map[c] = (map[c] || 0) + Number(t.amount); });
     return Object.entries(map).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
   }, [txns]);
 
@@ -207,14 +218,14 @@ function IncomeExpenditureStatement({ txns }) {
   const income = useMemo(() => {
     const map = {};
     INCOME_CATEGORIES.forEach((c) => { map[c] = 0; });
-    inRange.filter((t) => t.type === "income").forEach((t) => { map[t.category] = (map[t.category] || 0) + Number(t.amount); });
+    inRange.filter((t) => t.type === "income").forEach((t) => { const c = statementCat(t); map[c] = (map[c] || 0) + Number(t.amount); });
     return map;
   }, [inRange]);
 
   const expense = useMemo(() => {
     const map = {};
     EXPENSE_CATEGORIES.forEach((c) => { map[c] = 0; });
-    inRange.filter((t) => t.type === "expense").forEach((t) => { map[t.category] = (map[t.category] || 0) + Number(t.amount); });
+    inRange.filter((t) => t.type === "expense").forEach((t) => { const c = statementCat(t); map[c] = (map[c] || 0) + Number(t.amount); });
     return map;
   }, [inRange]);
 
