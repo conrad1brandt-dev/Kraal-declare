@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Plus, X, ChevronLeft, Clock, CheckCircle2, Pencil, Trash2, TrendingUp } from "lucide-react";
+import { Plus, X, ChevronLeft, Clock, CheckCircle2, Pencil, Trash2, TrendingUp, Tag } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { dbRead, dbWrite } from "./offline";
+import OfficialTags from "./OfficialTags";
 
 const CATEGORY_ORDER = {
   sheep: ["Ram (breeding male)", "Groot Ooie (mature ewe/nanny)", "Hamel/Kapater (castrated male)", "Jong Ooie (young ewe/nanny)", "Lam (female)", "Lam (male)"],
@@ -40,6 +41,8 @@ export default function Owners({ establishmentId, isAdmin }) {
   const [showEdit, setShowEdit] = useState(null);
   const [showPriceAdd, setShowPriceAdd] = useState(false);
   const [filter, setFilter] = useState("all");
+  const [tagCounts, setTagCounts] = useState({});
+  const [tagsFor, setTagsFor] = useState(null);
 
   useEffect(() => { load(); }, [establishmentId]);
 
@@ -57,6 +60,12 @@ export default function Owners({ establishmentId, isAdmin }) {
       ),
     ]);
     setOwners(o || []);
+    // official tags per owner (in use / spare); the screen still works if the table isn't there yet
+    const t = await dbRead(`official_tag_counts:${establishmentId}`, () =>
+      supabase.from("official_tags").select("owner_id, animal_id").eq("establishment_id", establishmentId)).catch(() => null);
+    const counts = {};
+    for (const r of (t && t.data) || []) { const c = (counts[r.owner_id] = counts[r.owner_id] || { used: 0, spare: 0 }); r.animal_id ? c.used++ : c.spare++; }
+    setTagCounts(counts);
     setAnimals(a || []);
     setPrices(p || []);
     setLoading(false);
@@ -141,6 +150,10 @@ export default function Owners({ establishmentId, isAdmin }) {
 
   const selectedOwner = filter !== "all" ? owners.find((o) => o.id === filter) : null;
 
+  if (tagsFor) {
+    return <OfficialTags owner={tagsFor} establishmentId={establishmentId} isAdmin={isAdmin} onBack={() => { setTagsFor(null); load(); }} />;
+  }
+
   if (showEdit) {
     return <EditOwnerModal owner={showEdit} onClose={() => setShowEdit(null)} onSave={(form) => updateOwner(showEdit.id, form)} />;
   }
@@ -218,8 +231,11 @@ export default function Owners({ establishmentId, isAdmin }) {
         <div className="stack">
           {owners.filter((o) => filter === "all" || o.id === filter).map((o) => {
             const brand = Array.isArray(o.brand_marks) ? o.brand_marks[0] : o.brand_marks;
+            const herd = animals.filter((a) => a.owner_id === o.id && a.status === "active").length;
+            const tc = tagCounts[o.id] || { used: 0, spare: 0 };
             return (
-              <div key={o.id} className="card row-between" style={{ padding: "12px 16px" }}>
+              <div key={o.id} className="card" style={{ padding: "12px 16px" }}>
+               <div className="row-between">
                 <div>
                   <div className="font-display" style={{ fontWeight: 600, fontSize: 16 }}>{o.full_name}</div>
                   <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>{o.email || o.contact_number || "no contact on file"}</div>
@@ -239,6 +255,11 @@ export default function Owners({ establishmentId, isAdmin }) {
                     </>
                   )}
                 </div>
+               </div>
+               <button onClick={() => setTagsFor(o)} className="row-between" style={{ width: "100%", marginTop: 10, padding: "8px 10px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--bg, #f6f3ea)", cursor: "pointer", fontSize: 13, color: "var(--ink)" }}>
+                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}><Tag size={13} /> Official tags</span>
+                 <span style={{ color: tc.used >= herd && herd > 0 ? "var(--green)" : "var(--ink-soft)" }}>{tc.used} of {herd} tagged{tc.spare ? ` · ${tc.spare} spare` : ""} ›</span>
+               </button>
               </div>
             );
           })}

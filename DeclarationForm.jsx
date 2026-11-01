@@ -17,7 +17,7 @@ async function loadSources(decl) {
   const asAt = end < today ? end : today;
   const q = (key, fn) => dbRead(`decl_src:${eid}:${decl.period}${decl.year}:${key}`, fn).then((r) => (r && r.data) || null).catch(() => null);
   const inPeriod = (t, sel = "*", dateCol = "date") => supabase.from(t).select(sel).eq("establishment_id", eid).gte(dateCol, start).lte(dateCol, end);
-  const [establishment, owners, animals, predators, thefts, diseases, slaughters, ownUse, feed, healthEvents, vaccinations, medicines, grazingIn, grazingAny, months] = await Promise.all([
+  const [establishment, owners, animals, predators, thefts, diseases, slaughters, ownUse, feed, healthEvents, vaccinations, medicines, grazingIn, grazingAny, tagRows, months] = await Promise.all([
     q("est", () => supabase.from("establishments").select("*").eq("id", eid).maybeSingle()),
     q("owners", () => supabase.from("owners").select("id, full_name, brand_marks(stock_brand_code, status)").eq("establishment_id", eid)),
     q("animals", () => supabase.from("animals").select("species, breed_category, sex, dob, status").eq("establishment_id", eid).eq("status", "active")),
@@ -32,6 +32,7 @@ async function loadSources(decl) {
     q("med", () => inPeriod("medicines_used", "*", "date_given")),
     q("gw", () => inPeriod("grazing_water_reports", "*", "report_date").order("report_date", { ascending: false }).limit(1)),
     q("gw_any", () => supabase.from("grazing_water_reports").select("*").eq("establishment_id", eid).lte("report_date", end).order("report_date", { ascending: false }).limit(1)),
+    q("tags", () => supabase.from("official_tags").select("animal_id").eq("establishment_id", eid).not("animal_id", "is", null)),
     q("budget", () => supabase.from("budget_months").select("id, budget_expenses(item_name, category, include)").eq("establishment_id", eid).gte("month", start).lte("month", end)),
   ]);
   const budgetFeeds = [...new Set((months || []).flatMap((m) => m.budget_expenses || [])
@@ -40,6 +41,7 @@ async function loadSources(decl) {
   return {
     establishment, owners, animals, predators, thefts, diseases, slaughters, ownUse, feed, healthEvents, vaccinations, medicines,
     grazing: (grazingIn && grazingIn[0]) || (grazingAny && grazingAny[0]) || null, budgetFeeds, asAt,
+    tagged: tagRows ? tagRows.length : null,
   };
 }
 
@@ -71,7 +73,7 @@ export default function DeclarationForm({ declaration, isAdmin, onBack }) {
 
   async function refresh() {
     const src = await loadSources(decl);
-    setLiveAuto(computeAuto(decl, src));
+    setLiveAuto({ ...computeAuto(decl, src), _tagged: src.tagged, _herd: (src.animals || []).length });
   }
 
   async function save(next) {
@@ -227,6 +229,11 @@ function Section({ s, fp, decl }) {
         {s.no ? `${s.no}. ` : ""}{s.title}
       </div>
       {s.sub && <div style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 8 }}>{s.sub}</div>}
+      {s.no === 6 && fp.auto._tagged != null && (
+        <div style={{ fontSize: 12, marginBottom: 8, color: fp.auto._tagged >= fp.auto._herd ? "var(--green)" : "#7A5A16" }}>
+          {fp.auto._tagged} of {fp.auto._herd} active animals have an official tag{fp.auto._tagged < fp.auto._herd ? " – the rest are on temporary IDs (see Owners › Official tags)" : ""}.
+        </div>
+      )}
       <div className="stack" style={{ gap: 10 }}>
         {s.fields.map((f) => <Field key={f.id} f={f} fp={fp} decl={decl} single={s.fields.length === 1} />)}
       </div>
